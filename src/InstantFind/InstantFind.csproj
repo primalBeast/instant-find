@@ -13,6 +13,7 @@
     <Copyright>Copyright (c) 2026 primalBeast</Copyright>
     <Description>Crowdstrike-friendly instant filename search for Windows. User-mode only — no drivers, no MFT/USN access.</Description>
     <Version>1.0.10</Version>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
@@ -23,6 +24,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <Resource Include="Assets\app.ico" />
+    <None Include="Assets\app-icon.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
