@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace InstantFind.Services;
 
 /// <summary>
@@ -27,11 +25,12 @@ public static class IndexPathHelpers
     {
         var exact = NormalizePrefix(directoryPrefix);
         var escaped = EscapeLike(exact);
-        var sep = "\\";
+        // With ESCAPE '\', a literal '\' must appear as '\\' in the pattern.
+        // Appending a single '\' before '%' would make '\%' (literal percent).
         return new DeletePatterns(
             Exact: exact,
-            PathLike: escaped + sep + "%",
-            DirectoryLike: escaped + sep + "%");
+            PathLike: escaped + "\\\\" + "%",
+            DirectoryLike: escaped + "\\\\" + "%");
     }
 
     public static string EscapeLike(string value) =>
