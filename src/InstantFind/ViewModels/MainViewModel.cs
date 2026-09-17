@@ -327,11 +327,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsIndexing) return;
         if (string.IsNullOrWhiteSpace(Query)) return;
 
+        // Silent path: never ScheduleSearch (that sets spinner / "Searching…").
+        // Watcher already debounce-coalesces (~350ms); re-query off UI thread.
         _dispatcher.BeginInvoke(() =>
         {
             if (IsIndexing) return;
             if (string.IsNullOrWhiteSpace(Query)) return;
-            ScheduleSearch();
+            _ = RunSilentRefreshAsync();
         });
     }
 
@@ -365,6 +367,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
     }
 
+    /// <summary>
+    /// User-initiated search: shows spinner and "Searching…" status.
+    /// </summary>
     private async Task RunSearchAsync()
     {
         var querySnapshot = Query;
@@ -398,31 +403,60 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        await _dispatcher.InvokeAsync(() =>
+        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation));
+    }
+
+    /// <summary>
+    /// Watcher-driven refresh: re-query off UI thread, swap Results, update final
+    /// status only. Never sets IsSearching or StatusText to "Searching…".
+    /// </summary>
+    private async Task RunSilentRefreshAsync()
+    {
+        var querySnapshot = Query;
+        if (string.IsNullOrWhiteSpace(querySnapshot)) return;
+
+        var options = BuildSearchOptions();
+        var generation = Interlocked.Increment(ref _searchGeneration);
+
+        IReadOnlyList<FileEntry> hits;
+        try
         {
-            // Ignore stale results if the query changed
-            if (generation != _searchGeneration) return;
+            hits = await Task.Run(() => _search.Search(querySnapshot, options)).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Keep prior results/status on silent failure — no flicker.
+            return;
+        }
 
-            Results.Clear();
-            foreach (var h in hits)
-                Results.Add(h);
+        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation));
+    }
 
-            IsSearching = false;
+    private void ApplySearchResults(IReadOnlyList<FileEntry> hits, int generation)
+    {
+        // Ignore stale results if a newer search/refresh superseded this one
+        if (generation != _searchGeneration) return;
 
-            if (string.IsNullOrWhiteSpace(Query))
-            {
-                StatusText = $"Ready — {_db.Count():N0} items indexed";
-            }
-            else if (Results.Count >= _settings.MaxResults)
-            {
-                StatusText =
-                    $"Showing {Results.Count:N0} results (limit reached — refine your search)";
-            }
-            else
-            {
-                StatusText = $"{Results.Count:N0} result(s)";
-            }
-        });
+        Results.Clear();
+        foreach (var h in hits)
+            Results.Add(h);
+
+        // User path turned the spinner on; silent path never did. Always clear here.
+        IsSearching = false;
+
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            StatusText = $"Ready — {_db.Count():N0} items indexed";
+        }
+        else if (Results.Count >= _settings.MaxResults)
+        {
+            StatusText =
+                $"Showing {Results.Count:N0} results (limit reached — refine your search)";
+        }
+        else
+        {
+            StatusText = $"{Results.Count:N0} result(s)";
+        }
     }
 
     public async Task RebuildIndexAsync()

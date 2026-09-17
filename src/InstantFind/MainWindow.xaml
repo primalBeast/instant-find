@@ -78,10 +78,13 @@
         <ToggleButton Grid.Column="1"
                       Content="Aa"
                       IsChecked="{Binding MatchCase}"
-                      Width="22" Height="20"
+                      MinWidth="26" Height="22"
+                      Padding="6,2"
                       Margin="0,0,4,0"
-                      FontSize="10"
+                      FontSize="11"
                       FontWeight="SemiBold"
+                      HorizontalContentAlignment="Center"
+                      ClipToBounds="False"
                       Background="{StaticResource PanelBrush}"
                       Foreground="{StaticResource FgBrush}"
                       BorderBrush="{StaticResource BorderBrush}"
@@ -92,10 +95,13 @@
         <ToggleButton Grid.Column="2"
                       Content="W"
                       IsChecked="{Binding WholeWord}"
-                      Width="20" Height="20"
+                      MinWidth="24" Height="22"
+                      Padding="6,2"
                       Margin="0,0,6,0"
-                      FontSize="10"
+                      FontSize="11"
                       FontWeight="SemiBold"
+                      HorizontalContentAlignment="Center"
+                      ClipToBounds="False"
                       Background="{StaticResource PanelBrush}"
                       Foreground="{StaticResource FgBrush}"
                       BorderBrush="{StaticResource BorderBrush}"
@@ -113,15 +119,49 @@
                  CaretBrush="{StaticResource FgBrush}"
                  VerticalContentAlignment="Center"/>
 
-        <ProgressBar Grid.Column="4"
-                     Width="22" Height="22"
-                     Margin="8,0,0,0"
-                     IsIndeterminate="True"
-                     Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Foreground="{StaticResource AccentBrush}"
-                     VerticalAlignment="Center"/>
+        <!-- Circular busy ring: rotates while IsSearching (user search only) -->
+        <Viewbox Grid.Column="4"
+                 Width="20" Height="20"
+                 Margin="8,0,0,0"
+                 VerticalAlignment="Center"
+                 Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}">
+          <Canvas Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
+            <Canvas.RenderTransform>
+              <RotateTransform Angle="0"/>
+            </Canvas.RenderTransform>
+            <Canvas.Style>
+              <Style TargetType="Canvas">
+                <Style.Triggers>
+                  <Trigger Property="IsVisible" Value="True">
+                    <Trigger.EnterActions>
+                      <BeginStoryboard x:Name="SpinnerSpin">
+                        <Storyboard RepeatBehavior="Forever">
+                          <DoubleAnimation
+                              Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                              From="0" To="360"
+                              Duration="0:0:0.75"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                      <StopStoryboard BeginStoryboardName="SpinnerSpin"/>
+                    </Trigger.ExitActions>
+                  </Trigger>
+                </Style.Triggers>
+              </Style>
+            </Canvas.Style>
+            <!-- Soft track ring -->
+            <Ellipse Canvas.Left="1" Canvas.Top="1"
+                     Width="18" Height="18"
+                     Stroke="#3F3F46" StrokeThickness="2.5"/>
+            <!-- Accent arc (~270°) -->
+            <Path Stroke="{StaticResource AccentBrush}"
+                  StrokeThickness="2.5"
+                  StrokeStartLineCap="Round"
+                  StrokeEndLineCap="Round"
+                  Data="M 10,2 A 8,8 0 1 1 2.34,12.34"/>
+          </Canvas>
+        </Viewbox>
       </Grid>
     </Border>
 
