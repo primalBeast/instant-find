@@ -2,11 +2,12 @@ namespace InstantFind.Models;
 
 /// <summary>
 /// Persisted user settings stored under %AppData%\InstantFind.
+/// MaxResults is editable in settings.json (no UI page).
 /// </summary>
 public sealed class AppSettings
 {
     public List<string> IndexedRoots { get; set; } = new();
-    public int MaxResults { get; set; } = 500;
+    public int MaxResults { get; set; } = 10000;
     public bool IncludeDirectories { get; set; } = true;
     public bool StartIndexingOnLaunch { get; set; } = true;
     public List<string> ExcludedDirectoryNames { get; set; } = new()

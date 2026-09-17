@@ -160,6 +160,10 @@ public sealed class IndexDatabase : IDisposable
 
     public IReadOnlyList<FileEntry> Search(ParsedQuery query, int maxResults, bool includeDirectories)
     {
+        // Wildcard queries must use SQL LIKE — FTS strip-wildcard cannot find D*.pdf → Document.pdf
+        if (query.HasWildcards)
+            return SearchWithLike(query, maxResults, includeDirectories);
+
         var results = new List<FileEntry>();
         var fts = QueryParser.BuildFtsMatch(query);
 
@@ -201,7 +205,7 @@ public sealed class IndexDatabase : IDisposable
             sql.Append(" WHERE ").Append(string.Join(" AND ", where));
 
         sql.Append(" LIMIT $limit;");
-        cmd.Parameters.AddWithValue("$limit", Math.Max(maxResults * 3, maxResults)); // over-fetch for wildcard refine
+        cmd.Parameters.AddWithValue("$limit", maxResults);
         cmd.CommandText = sql.ToString();
 
         try
@@ -210,14 +214,10 @@ public sealed class IndexDatabase : IDisposable
             while (reader.Read())
             {
                 var entry = ReadEntry(reader);
-                if (query.HasWildcards || query.Terms.Count > 0)
+                if (query.Terms.Count > 0)
                 {
                     if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension))
                         continue;
-                }
-                else if (query.Extensions.Count > 0)
-                {
-                    // ext-only already filtered in SQL
                 }
 
                 results.Add(entry);
@@ -228,30 +228,86 @@ public sealed class IndexDatabase : IDisposable
         catch (SqliteException)
         {
             // Bad FTS syntax — fall back to LIKE search
-            return SearchLikeFallback(query, maxResults, includeDirectories);
+            return SearchWithLike(query, maxResults, includeDirectories);
         }
 
         return results;
     }
 
-    private IReadOnlyList<FileEntry> SearchLikeFallback(ParsedQuery query, int maxResults, bool includeDirectories)
+    /// <summary>
+    /// Primary path for wildcard queries (* ?): SQL LIKE on name/path.
+    /// Also used as FTS failure fallback for plain terms.
+    /// </summary>
+    private IReadOnlyList<FileEntry> SearchWithLike(ParsedQuery query, int maxResults, bool includeDirectories)
     {
         var results = new List<FileEntry>();
         using var cmd = Conn().CreateCommand();
-        cmd.CommandText = """
+        var sql = new System.Text.StringBuilder();
+        sql.Append("""
             SELECT id, name, path, directory, extension, size, modified_utc, is_directory
             FROM files
-            LIMIT 50000;
-            """;
+            """);
+
+        var where = new List<string>();
+
+        for (int i = 0; i < query.Terms.Count; i++)
+        {
+            var term = query.Terms[i];
+            var pname = $"$like{i}";
+            string pattern;
+            if (term.Contains('*') || term.Contains('?'))
+                pattern = QueryParser.ShellWildcardToLike(term);
+            else
+                pattern = QueryParser.PlainTermToLike(term);
+
+            // Match filename OR full path (case-insensitive for ASCII)
+            where.Add($"(LOWER(name) LIKE LOWER({pname}) ESCAPE '\\' OR LOWER(path) LIKE LOWER({pname}) ESCAPE '\\')");
+            cmd.Parameters.AddWithValue(pname, pattern);
+        }
+
+        if (query.Extensions.Count > 0)
+        {
+            var extParams = new List<string>();
+            for (int i = 0; i < query.Extensions.Count; i++)
+            {
+                var pname = $"$ext{i}";
+                extParams.Add(pname);
+                cmd.Parameters.AddWithValue(pname, query.Extensions[i].ToLowerInvariant());
+            }
+            where.Add($"LOWER(extension) IN ({string.Join(",", extParams)})");
+        }
+
+        if (!includeDirectories)
+            where.Add("is_directory = 0");
+
+        if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
+            return results;
+
+        // ext-only query with no terms
+        if (where.Count == 0)
+            return results;
+
+        sql.Append(" WHERE ").Append(string.Join(" AND ", where));
+        sql.Append(" LIMIT $limit;");
+        cmd.Parameters.AddWithValue("$limit", maxResults);
+        cmd.CommandText = sql.ToString();
+
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             var entry = ReadEntry(reader);
-            if (!includeDirectories && entry.IsDirectory) continue;
-            if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension)) continue;
+            // Refine with in-memory matcher so ? / * semantics stay consistent
+            if (query.Terms.Count > 0 || query.Extensions.Count > 0)
+            {
+                if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension))
+                    continue;
+            }
+
             results.Add(entry);
-            if (results.Count >= maxResults) break;
+            if (results.Count >= maxResults)
+                break;
         }
+
         return results;
     }
 

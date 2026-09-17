@@ -98,25 +98,70 @@ public static class QueryParser
     }
 
     /// <summary>
-    /// Builds an FTS5 MATCH expression. Uses prefix/token matching; wildcards are applied post-filter.
+    /// Converts a shell wildcard term (* ?) to a SQL LIKE pattern.
+    /// Escapes %, _, and \ in literal parts; maps * → %, ? → _.
+    /// </summary>
+    public static string ShellWildcardToLike(string term)
+    {
+        var sb = new StringBuilder(term.Length);
+        foreach (var c in term)
+        {
+            switch (c)
+            {
+                case '*':
+                    sb.Append('%');
+                    break;
+                case '?':
+                    sb.Append('_');
+                    break;
+                case '%':
+                case '_':
+                case '\\':
+                    sb.Append('\\');
+                    sb.Append(c);
+                    break;
+                default:
+                    sb.Append(c);
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Converts a plain (non-wildcard) term to a substring LIKE pattern (%term%).
+    /// </summary>
+    public static string PlainTermToLike(string term)
+    {
+        return "%" + EscapeLikeLiteral(term) + "%";
+    }
+
+    /// <summary>
+    /// Escapes SQL LIKE metacharacters in a literal string (no wildcard conversion).
+    /// </summary>
+    public static string EscapeLikeLiteral(string value)
+    {
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("%", "\\%")
+            .Replace("_", "\\_");
+    }
+
+    /// <summary>
+    /// Builds an FTS5 MATCH expression for plain (non-wildcard) substring terms only.
+    /// Returns null when the query has wildcards or no usable terms — callers should use LIKE instead.
     /// </summary>
     public static string? BuildFtsMatch(ParsedQuery query)
     {
+        if (query.HasWildcards)
+            return null;
+
         if (query.Terms.Count == 0)
             return null;
 
         var parts = new List<string>();
         foreach (var term in query.Terms)
         {
-            if (term.Contains('*') || term.Contains('?'))
-            {
-                // Strip wildcards for a coarse FTS prefix; refine in memory.
-                var stripped = term.Replace("*", "").Replace("?", "");
-                if (stripped.Length >= 2)
-                    parts.Add(EscapeFtsToken(stripped) + "*");
-                continue;
-            }
-
             if (term.Length == 0)
                 continue;
 

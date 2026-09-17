@@ -20,13 +20,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly FileWatcherService _watcher;
     private readonly SearchService _search;
     private readonly DispatcherTimer _debounce;
+    private readonly Dispatcher _dispatcher;
     private string _query = string.Empty;
     private string _statusText = "Ready";
     private bool _isIndexing;
+    private bool _isSearching;
     private FileEntry? _selected;
+    private int _searchGeneration;
 
     public MainViewModel()
     {
+        _dispatcher = Dispatcher.CurrentDispatcher;
         _settingsService = new SettingsService();
         _settings = _settingsService.Load();
         _db = new IndexDatabase(_settingsService.DatabasePath);
@@ -41,7 +45,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _debounce.Tick += (_, _) =>
         {
             _debounce.Stop();
-            RunSearch();
+            _ = RunSearchAsync();
         };
 
         OpenCommand = new RelayCommand(_ => OpenSelected(), _ => SelectedItem is not null);
@@ -74,6 +78,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _query, value))
             {
+                // Show spinner as soon as the query changes / debounce starts
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    IsSearching = true;
+                    StatusText = "Searching…";
+                }
+                else
+                {
+                    // Invalidate in-flight searches
+                    Interlocked.Increment(ref _searchGeneration);
+                    IsSearching = false;
+                    Results.Clear();
+                    StatusText = $"Ready — {_db.Count():N0} items indexed";
+                }
+
                 _debounce.Stop();
                 _debounce.Start();
             }
@@ -98,6 +117,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool IsSearching
+    {
+        get => _isSearching;
+        set => Set(ref _isSearching, value);
+    }
+
     public FileEntry? SelectedItem
     {
         get => _selected;
@@ -114,22 +139,63 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ? "(none)"
             : string.Join(", ", _settings.IndexedRoots);
 
-    private void RunSearch()
+    private async Task RunSearchAsync()
     {
+        var querySnapshot = Query;
+        var generation = Interlocked.Increment(ref _searchGeneration);
+
+        if (string.IsNullOrWhiteSpace(querySnapshot))
+        {
+            IsSearching = false;
+            Results.Clear();
+            StatusText = $"Ready — {_db.Count():N0} items indexed";
+            return;
+        }
+
+        IsSearching = true;
+        StatusText = "Searching…";
+
+        IReadOnlyList<FileEntry> hits;
         try
         {
-            var hits = _search.Search(Query);
-            Results.Clear();
-            foreach (var h in hits)
-                Results.Add(h);
-            StatusText = string.IsNullOrWhiteSpace(Query)
-                ? $"Ready — {_db.Count():N0} items indexed"
-                : $"{Results.Count:N0} result(s)";
+            hits = await Task.Run(() => _search.Search(querySnapshot)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            StatusText = "Search error: " + ex.Message;
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (generation != _searchGeneration) return;
+                IsSearching = false;
+                StatusText = "Search error: " + ex.Message;
+            });
+            return;
         }
+
+        await _dispatcher.InvokeAsync(() =>
+        {
+            // Ignore stale results if the query changed
+            if (generation != _searchGeneration) return;
+
+            Results.Clear();
+            foreach (var h in hits)
+                Results.Add(h);
+
+            IsSearching = false;
+
+            if (string.IsNullOrWhiteSpace(Query))
+            {
+                StatusText = $"Ready — {_db.Count():N0} items indexed";
+            }
+            else if (Results.Count >= _settings.MaxResults)
+            {
+                StatusText =
+                    $"Showing {Results.Count:N0} results (limit reached — refine your search)";
+            }
+            else
+            {
+                StatusText = $"{Results.Count:N0} result(s)";
+            }
+        });
     }
 
     public async Task RebuildIndexAsync()
@@ -151,7 +217,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 {
                     StatusText = $"Indexed {p.FilesIndexed:N0} items";
                     _watcher.Start(_settings.IndexedRoots);
-                    RunSearch();
+                    _ = RunSearchAsync();
                 }
             }
         });
@@ -216,6 +282,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
+        Interlocked.Increment(ref _searchGeneration);
+        _debounce.Stop();
         _watcher.Dispose();
         _indexer.Cancel();
         _db.Dispose();

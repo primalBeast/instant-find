@@ -32,7 +32,7 @@
       </StackPanel>
     </DockPanel>
 
-    <!-- Search box -->
+    <!-- Search box + spinner -->
     <Border DockPanel.Dock="Top"
             Background="{StaticResource PanelBrush}"
             BorderBrush="{StaticResource BorderBrush}"
@@ -40,14 +40,30 @@
             CornerRadius="4"
             Padding="8,6"
             Margin="0,0,0,8">
-      <TextBox x:Name="SearchBox"
-               Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
-               FontSize="16"
-               Background="Transparent"
-               Foreground="{StaticResource FgBrush}"
-               BorderThickness="0"
-               CaretBrush="{StaticResource FgBrush}"
-               VerticalContentAlignment="Center"/>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBox x:Name="SearchBox"
+                 Grid.Column="0"
+                 Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                 FontSize="16"
+                 Background="Transparent"
+                 Foreground="{StaticResource FgBrush}"
+                 BorderThickness="0"
+                 CaretBrush="{StaticResource FgBrush}"
+                 VerticalContentAlignment="Center"/>
+        <ProgressBar Grid.Column="1"
+                     Width="22" Height="22"
+                     Margin="8,0,0,0"
+                     IsIndeterminate="True"
+                     Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Foreground="{StaticResource AccentBrush}"
+                     VerticalAlignment="Center"/>
+      </Grid>
     </Border>
 
     <TextBlock DockPanel.Dock="Top"

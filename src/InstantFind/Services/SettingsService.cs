@@ -9,6 +9,9 @@ namespace InstantFind.Services;
 /// </summary>
 public sealed class SettingsService
 {
+    private const int DefaultMaxResults = 10000;
+    private const int LegacyDefaultMaxResults = 500;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -95,7 +98,9 @@ public sealed class SettingsService
 
     private static void EnsureDefaults(AppSettings settings)
     {
-        if (settings.MaxResults <= 0) settings.MaxResults = 500;
+        // Invalid or legacy v1.0.0 default (500) → raise to 10000
+        if (settings.MaxResults <= 0 || settings.MaxResults == LegacyDefaultMaxResults)
+            settings.MaxResults = DefaultMaxResults;
         if (settings.ExcludedDirectoryNames is null)
             settings.ExcludedDirectoryNames = new List<string>();
         if (settings.IndexedRoots is null)

@@ -22,11 +22,40 @@ public class QueryParserTests
     [InlineData("rep?rt.pdf", "report.pdf", @"C:\docs\report.pdf", "pdf", true)]
     [InlineData("rep?rt.pdf", "reprt.pdf", @"C:\docs\reprt.pdf", "pdf", false)]
     [InlineData("test*.txt", "test_file.txt", @"C:\a\test_file.txt", "txt", true)]
+    [InlineData("D*.pdf", "Document.pdf", @"C:\docs\Document.pdf", "pdf", true)]
+    [InlineData("D*.pdf", "data.pdf", @"C:\docs\data.pdf", "pdf", true)]
+    [InlineData("D*.pdf", "report.pdf", @"C:\docs\report.pdf", "pdf", false)]
+    [InlineData("test?.txt", "test1.txt", @"C:\a\test1.txt", "txt", true)]
+    [InlineData("test?.txt", "test12.txt", @"C:\a\test12.txt", "txt", false)]
     public void Wildcard_match(string query, string name, string path, string ext, bool expected)
     {
         var q = QueryParser.Parse(query);
         Assert.True(q.HasWildcards);
         Assert.Equal(expected, QueryParser.Matches(q, name, path, ext));
+    }
+
+    [Fact]
+    public void ShellWildcardToLike_D_star_pdf()
+    {
+        Assert.Equal("D%.pdf", QueryParser.ShellWildcardToLike("D*.pdf"));
+        Assert.Equal("%.pdf", QueryParser.ShellWildcardToLike("*.pdf"));
+        Assert.Equal("test_.txt", QueryParser.ShellWildcardToLike("test?.txt"));
+    }
+
+    [Fact]
+    public void ShellWildcardToLike_escapes_literals()
+    {
+        Assert.Equal("100\\%.txt", QueryParser.ShellWildcardToLike("100%.txt"));
+        Assert.Equal("a\\_b", QueryParser.ShellWildcardToLike("a_b"));
+        Assert.Equal("a\\\\b", QueryParser.ShellWildcardToLike("a\\b"));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_returns_null_for_wildcards()
+    {
+        var q = QueryParser.Parse("D*.pdf");
+        Assert.True(q.HasWildcards);
+        Assert.Null(QueryParser.BuildFtsMatch(q));
     }
 
     [Fact]

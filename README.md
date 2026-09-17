@@ -13,10 +13,10 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
 | Direct zip (once a tag exists) | `https://github.com/primalBeast/instant-find/releases/download/vX.Y.Z/InstantFind-win-x64.zip` |
 
-Example after `v1.0.0` is published:
+Example after `v1.0.1` is published:
 
 ```text
-https://github.com/primalBeast/instant-find/releases/download/v1.0.0/InstantFind-win-x64.zip
+https://github.com/primalBeast/instant-find/releases/download/v1.0.1/InstantFind-win-x64.zip
 ```
 
 1. Download `InstantFind-win-x64.zip`
@@ -43,15 +43,18 @@ Settings and the index database live under:
   index.db
 ```
 
+`maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
+
 ## Features
 
 - Instant as-you-type search after the first index completes
+- Search spinner while a query is in flight (search runs off the UI thread)
 - Results columns: **Name**, **Path**, **Size**, **Date Modified**
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
 - Double-click opens the file (or folder)
 - Filters:
-  - Substring match (case-insensitive)
-  - Wildcards `*` and `?`
+  - Substring match (case-insensitive) via FTS5
+  - Wildcards `*` and `?` via SQL `LIKE` (e.g. `D*.pdf`, `*.pdf`, `test?.txt`)
   - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
 - Parallel multi-root indexing with progress status
 - Skips inaccessible directories instead of failing
@@ -83,7 +86,7 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.0 && git push origin v1.0.0`
+1. **Tag** — push a version tag: `git tag v1.0.1 && git push origin v1.0.1`
 2. **Manual** — Actions → **Build & Release** → **Run workflow** (optional version input)
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
