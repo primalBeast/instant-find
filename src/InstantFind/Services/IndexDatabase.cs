@@ -486,6 +486,20 @@ public sealed class IndexDatabase : IDisposable
             var term = query.Terms[i];
             var pname = $"$like{i}";
             bool isWildcard = term.Contains('*') || term.Contains('?');
+            bool isPathTerm = QueryParser.IsPathTerm(term);
+
+            // Everything-like \72: filter on path only (segment-prefix refined in Matches)
+            if (isPathTerm)
+            {
+                string pathExpr = options.MatchCase ? "path" : "LOWER(path)";
+                string likeExpr = options.MatchCase ? pname : $"LOWER({pname})";
+                string pattern = isWildcard
+                    ? QueryParser.ShellWildcardToLike(term)
+                    : QueryParser.PathTermToLike(term);
+                termClauses.Add($"{pathExpr} LIKE {likeExpr} ESCAPE '\\'");
+                cmd.Parameters.AddWithValue(pname, pattern);
+                continue;
+            }
 
             if (options.WholeWord && !isWildcard)
             {

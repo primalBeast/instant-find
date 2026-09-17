@@ -6,7 +6,8 @@ namespace InstantFind.Services;
 
 /// <summary>
 /// Parses Instant Find query syntax: substrings, * ? wildcards, optional ext:pdf filters,
-/// optional directory path-scope (leading Windows path ending in \), and optional regex body.
+/// optional directory path-scope (leading Windows path ending in \), Everything-like
+/// path terms (leading \), and optional regex body.
 /// </summary>
 public sealed class ParsedQuery
 {
@@ -381,6 +382,10 @@ public static class QueryParser
         StringComparison comparison,
         bool wholeWord)
     {
+        // Everything-like \72: path/directory segment starts with rest — never bare-name FTS.
+        if (IsPathTerm(term))
+            return PathTermMatches(term, fullPath, comparison, wholeWord);
+
         if (term.Contains('*') || term.Contains('?'))
         {
             var options = comparison == StringComparison.Ordinal
@@ -410,6 +415,59 @@ public static class QueryParser
 
         return fullPath.Contains(term, comparison)
                || name.Contains(term, comparison);
+    }
+
+    /// <summary>
+    /// Path term <c>\rest</c>: true when any path segment starts with <c>rest</c>
+    /// (Whole Word → segment equals <c>rest</c>). Supports * ? in <c>rest</c>.
+    /// </summary>
+    private static bool PathTermMatches(
+        string term,
+        string fullPath,
+        StringComparison comparison,
+        bool wholeWord)
+    {
+        var rest = PathTermRest(term);
+        if (rest.Length == 0 || string.IsNullOrEmpty(fullPath))
+            return false;
+
+        // Multi-segment fragment (\foo\bar): require the literal path piece in fullPath
+        if ((rest.Contains('\\') || rest.Contains('/')) && !(rest.Contains('*') || rest.Contains('?')))
+            return fullPath.Contains(term, comparison);
+
+        bool hasWild = rest.Contains('*') || rest.Contains('?');
+        Regex? wildRx = null;
+        if (hasWild)
+        {
+            var options = comparison == StringComparison.Ordinal
+                ? RegexOptions.CultureInvariant
+                : RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+            var body = Regex.Escape(rest).Replace("\\*", ".*").Replace("\\?", ".");
+            // Segment prefix: ^rest*  (or exact when wholeWord and no trailing wildcard intent)
+            wildRx = new Regex("^" + body, options);
+        }
+
+        foreach (var segment in fullPath.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (hasWild)
+            {
+                if (wildRx!.IsMatch(segment))
+                    return true;
+                continue;
+            }
+
+            if (wholeWord)
+            {
+                if (string.Equals(segment, rest, comparison))
+                    return true;
+            }
+            else if (segment.StartsWith(rest, comparison))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool WholeWordMatches(string term, string name, string fullPath, StringComparison comparison)
@@ -515,6 +573,32 @@ public static class QueryParser
             .Replace("_", "\\_");
     }
 
+
+    /// <summary>
+    /// Everything-like path term: starts with '\' (and is not empty after it).
+    /// Matches a path/directory <em>segment</em> that starts with the rest after '\',
+    /// never bare-name FTS that ignores '\'.
+    /// Drive path-scope (<c>C:\foo\</c>) is separate — see <see cref="TryExtractPathScope"/>.
+    /// </summary>
+    public static bool IsPathTerm(string term)
+        => term.Length >= 2 && term[0] == '\\';
+
+    /// <summary>Text after the leading '\' of a path term; empty if not a path term.</summary>
+    public static string PathTermRest(string term)
+        => IsPathTerm(term) ? term.Substring(1) : string.Empty;
+
+    /// <summary>
+    /// SQL LIKE pattern for a path term: %\rest% with LIKE metacharacters escaped.
+    /// Used against <c>path</c> only (not bare <c>name</c>).
+    /// </summary>
+    public static string PathTermToLike(string term)
+    {
+        if (!IsPathTerm(term))
+            return PlainTermToLike(term);
+        // Keep the leading '\' so the match is always after a separator / drive root.
+        return PlainTermToLike(term);
+    }
+
     /// <summary>
     /// True when a plain term contains characters that FTS5 unicode61 treats as token
     /// separators (e.g. '_' / '-'). Those queries must use LIKE so literals are preserved.
@@ -550,6 +634,10 @@ public static class QueryParser
         {
             if (term.Length == 0)
                 continue;
+
+            // Everything-like \72 → path segment match; never bare-name FTS that ignores '\'
+            if (IsPathTerm(term))
+                return null;
 
             // unicode61 splits on '_' / '-' / other punctuation → token too loose (e.g. "72_" → "72")
             if (TermHasFtsTokenSeparators(term))

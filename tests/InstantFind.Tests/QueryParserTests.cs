@@ -454,4 +454,77 @@ public class QueryParserTests
         Assert.False(QueryParser.Matches(q, "report.xlsx", @"C:\Projects\report.xlsx", "xlsx"));
         Assert.False(QueryParser.Matches(q, "budget.xlsx", @"C:\Other\budget.xlsx", "xlsx"));
     }
+
+    // ----- v1.0.11: Everything-like path term \72 -----
+
+    [Fact]
+    public void PathTerm_backslash72_is_path_term_not_scope()
+    {
+        var q = QueryParser.Parse(@"\72");
+        Assert.Null(q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.True(QueryParser.IsPathTerm(@"\72"));
+        Assert.Equal("72", QueryParser.PathTermRest(@"\72"));
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
+
+    [Fact]
+    public void PathTerm_backslash72_matches_segment_prefix()
+    {
+        var q = QueryParser.Parse(@"\72");
+        // Segment starts with 72
+        Assert.True(QueryParser.Matches(q, "72folder", @"C:\data\72folder", ""));
+        Assert.True(QueryParser.Matches(q, "file.txt", @"C:\72reports\file.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "72report.txt", @"C:\docs\72report.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "72", @"D:\72", ""));
+    }
+
+    [Fact]
+    public void PathTerm_backslash72_does_not_match_mid_segment_or_bare_fts()
+    {
+        var q = QueryParser.Parse(@"\72");
+        // Segment does NOT start with 72 (would wrongly match bare FTS "72")
+        Assert.False(QueryParser.Matches(q, "x72y.txt", @"C:\data\x72y.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "6728", @"C:\data\6728", ""));
+        Assert.False(QueryParser.Matches(q, "file.txt", @"C:\data\file.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "a72", @"C:\other\a72\file.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathTerm_keeps_drive_path_scope()
+    {
+        var q = QueryParser.Parse(@"C:\foo\");
+        Assert.Equal(@"C:\foo\", q.PathScope);
+        Assert.Empty(q.Terms);
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\foo\a.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "a.txt", @"C:\other\a.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathTerm_with_path_scope_combined()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\ \72");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.True(QueryParser.Matches(q, "72x.txt", @"C:\Projects\72x.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "72x.txt", @"C:\Other\72x.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "x72.txt", @"C:\Projects\x72.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathTermToLike_escapes_leading_backslash()
+    {
+        // LIKE ESCAPE '\': \\ = literal backslash → pattern matches paths containing \72
+        Assert.Equal(@"%\\72%", QueryParser.PathTermToLike(@"\72"));
+    }
+
+    [Fact]
+    public void PathTerm_whole_word_requires_exact_segment()
+    {
+        var q = QueryParser.Parse(@"\72");
+        Assert.True(QueryParser.Matches(q, "72", @"C:\data\72", "", matchCase: false, wholeWord: true));
+        Assert.False(QueryParser.Matches(q, "72folder", @"C:\data\72folder", "", matchCase: false, wholeWord: true));
+    }
+
+
 }
