@@ -149,11 +149,14 @@ public static class QueryParser
 
     private static bool WholeWordMatches(string term, string name, string fullPath, StringComparison comparison)
     {
-        if (string.Equals(name, term, comparison))
+        if (ContainsWholeWord(name, term, comparison))
+            return true;
+        if (ContainsWholeWord(fullPath, term, comparison))
             return true;
 
-        var fileName = System.IO.Path.GetFileName(fullPath);
-        if (string.Equals(fileName, term, comparison))
+        // Filename stem (report.pdf → report)
+        var stem = System.IO.Path.GetFileNameWithoutExtension(name);
+        if (!string.IsNullOrEmpty(stem) && string.Equals(stem, term, comparison))
             return true;
 
         // Path segment equality (e.g. term "docs" matches C:\docs\file.txt)
@@ -161,10 +164,41 @@ public static class QueryParser
         {
             if (string.Equals(segment, term, comparison))
                 return true;
+            var segStem = System.IO.Path.GetFileNameWithoutExtension(segment);
+            if (!string.IsNullOrEmpty(segStem) && string.Equals(segStem, term, comparison))
+                return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// True when <paramref name="term"/> appears as a whole word in <paramref name="haystack"/>
+    /// (bounded by start/end or non-letter/digit characters).
+    /// </summary>
+    private static bool ContainsWholeWord(string haystack, string term, StringComparison comparison)
+    {
+        if (string.IsNullOrEmpty(haystack) || string.IsNullOrEmpty(term))
+            return false;
+
+        int start = 0;
+        while (start <= haystack.Length - term.Length)
+        {
+            var idx = haystack.IndexOf(term, start, comparison);
+            if (idx < 0) return false;
+
+            bool leftOk = idx == 0 || !IsWordChar(haystack[idx - 1]);
+            int end = idx + term.Length;
+            bool rightOk = end == haystack.Length || !IsWordChar(haystack[end]);
+            if (leftOk && rightOk)
+                return true;
+
+            start = idx + 1;
+        }
+        return false;
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>
     /// Converts a shell wildcard term (* ?) to a SQL LIKE pattern.
