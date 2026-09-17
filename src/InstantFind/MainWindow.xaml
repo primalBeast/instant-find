@@ -10,17 +10,49 @@
         Foreground="{StaticResource FgBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
   <DockPanel Margin="12">
-    <!-- Header: title + rebuild -->
+    <!-- Header: title + rebuild + help -->
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-      <TextBlock Text="Instant Find"
-                 FontSize="20" FontWeight="SemiBold"
-                 VerticalAlignment="Center"
-                 DockPanel.Dock="Left"
-                 Margin="0,0,16,0"/>
+      <Button Content="?"
+              Click="HelpButton_Click"
+              Width="28" Height="28"
+              Margin="8,0,0,0"
+              FontSize="14" FontWeight="Bold"
+              DockPanel.Dock="Right"
+              VerticalAlignment="Center"
+              Cursor="Hand"
+              ToolTip="Help"
+              Background="{StaticResource PanelBrush}"
+              Foreground="{StaticResource FgBrush}"
+              BorderBrush="{StaticResource BorderBrush}"
+              BorderThickness="1"
+              SnapsToDevicePixels="True">
+        <Button.Template>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="14"
+                    Width="28" Height="28"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Button.Template>
+      </Button>
       <Button Content="{Binding IndexButtonText}"
               Command="{Binding IndexButtonCommand}"
               Padding="12,6"
               MinWidth="128"
+              Margin="0,0,0,0"
+              DockPanel.Dock="Right"
+              VerticalAlignment="Center"
               HorizontalAlignment="Right"
               Cursor="Hand"
               FontWeight="SemiBold"
@@ -71,6 +103,10 @@
           </Style>
         </Button.Style>
       </Button>
+      <TextBlock Text="Instant Find"
+                 FontSize="20" FontWeight="SemiBold"
+                 VerticalAlignment="Center"
+                 Margin="0,0,16,0"/>
     </DockPanel>
 
     <!-- Search bar: ✕ / Aa / W / .* / box / And / Or / spinner -->
@@ -454,7 +490,7 @@
                             Foreground="{StaticResource FgBrush}"
                             BorderBrush="{StaticResource BorderBrush}"
                             Cursor="Hand"
-                            ToolTip="Toggle drive in results / rebuild"/>
+                            ToolTip="Toggle drive in results"/>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

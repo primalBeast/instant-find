@@ -137,6 +137,14 @@ public partial class MainWindow : Window
         return null;
     }
 
+
+    private void HelpButton_Click(object sender, RoutedEventArgs e)
+    {
+        var help = new HelpWindow { Owner = this };
+        help.ShowDialog();
+        SearchBox.Focus();
+    }
+
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Down && SearchBox.IsKeyboardFocusWithin && ResultsGrid.Items.Count > 0)
