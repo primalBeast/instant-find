@@ -43,6 +43,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _indexer = new FileIndexer(_db, _settings);
         _watcher = new FileWatcherService(_db, _indexer);
         _search = new SearchService(_db, _settings);
+        _watcher.IndexMutated += OnIndexMutated;
 
         Results = new ObservableCollection<FileEntry>();
         DriveChips = new ObservableCollection<DriveChip>();
@@ -312,6 +313,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .ToList();
     }
 
+    private void OnIndexMutated()
+    {
+        // Ignore while full rebuild is running — avoids thrashing mid-index.
+        if (IsIndexing) return;
+        if (string.IsNullOrWhiteSpace(Query)) return;
+
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (IsIndexing) return;
+            if (string.IsNullOrWhiteSpace(Query)) return;
+            ScheduleSearch();
+        });
+    }
+
     private void ScheduleSearch()
     {
         if (!string.IsNullOrWhiteSpace(Query))
@@ -568,6 +583,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Interlocked.Increment(ref _searchGeneration);
         _debounce.Stop();
+        _watcher.IndexMutated -= OnIndexMutated;
         _watcher.Dispose();
         _indexer.Cancel();
         _db.Dispose();

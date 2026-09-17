@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.2) | https://github.com/primalBeast/instant-find/releases/download/v1.0.2/InstantFind-win-x64.zip |
+| Direct zip (v1.0.3) | https://github.com/primalBeast/instant-find/releases/download/v1.0.3/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -39,9 +39,11 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.2)
+## Features (v1.0.3)
 
 - Instant as-you-type search after the first index completes
+- **Live results refresh**: when the index updates (create/change/delete/rename via FileSystemWatcher), an active query re-runs automatically (debounced ~350ms) so new files appear within ~1 second
+- Compact search-bar tools (✕ / Aa / W) sized ~20–22px
 - Search spinner while a query is in flight (search runs off the UI thread)
 - **And / Or** checkboxes (right of title): default And; both off = literal whitespace (spaces must appear in the name)
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
@@ -84,8 +86,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.2 && git push origin v1.0.2`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.2`
+1. **Tag** — push a version tag: `git tag v1.0.3 && git push origin v1.0.3`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.3`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 
