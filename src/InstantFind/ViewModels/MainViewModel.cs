@@ -338,7 +338,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             MatchMode = _settings.MatchMode,
             MatchCase = MatchCase,
             WholeWord = WholeWord,
-            EnabledDrivePrefixes = DriveHelpers.ToPathPrefixes(_settings.EnabledDrives ?? Array.Empty<string>())
+            EnabledDrivePrefixes = DriveHelpers.ToPathPrefixes(_settings.EnabledDrives ?? new List<string>())
         };
     }
 

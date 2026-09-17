@@ -56,7 +56,7 @@ public sealed class FileIndexer
         // Rebuild Index uses enabled drives only (chips). No new per-drive watchers.
         var roots = _settings.IndexedRoots
             .Where(Directory.Exists)
-            .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? Array.Empty<string>()))
+            .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? new List<string>()))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
