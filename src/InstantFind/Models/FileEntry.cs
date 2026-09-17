@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
+using InstantFind.Services;
 
 namespace InstantFind.Models;
 
@@ -7,11 +9,13 @@ namespace InstantFind.Models;
 /// Indexed file or directory metadata shown in search results.
 /// Size and ModifiedUtc come from the SQLite index (set at crawl /
 /// FileWatcher IndexSinglePath), not live disk on every search.
+/// Attributes are indexed when available; live File.GetAttributes is a fallback.
 /// </summary>
 public sealed class FileEntry : INotifyPropertyChanged
 {
     private long _size;
     private DateTime _modifiedUtc;
+    private string _attributesText = string.Empty;
 
     public long Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -42,6 +46,32 @@ public sealed class FileEntry : INotifyPropertyChanged
             OnPropertyChanged(nameof(ModifiedDisplay));
         }
     }
+
+    /// <summary>Compact attribute letters (R/H/S/A/…), from index or live fallback.</summary>
+    public string AttributesText
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(_attributesText))
+                return _attributesText;
+            try
+            {
+                if (!string.IsNullOrEmpty(Path))
+                    return QueryParser.FormatAttributes(File.GetAttributes(Path));
+            }
+            catch { }
+            return string.Empty;
+        }
+        set
+        {
+            if (_attributesText == value) return;
+            _attributesText = value ?? string.Empty;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(AttributesDisplay));
+        }
+    }
+
+    public string AttributesDisplay => AttributesText;
 
     public bool IsDirectory { get; set; }
 

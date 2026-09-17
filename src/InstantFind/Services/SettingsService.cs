@@ -131,6 +131,21 @@ public sealed class SettingsService
             }
             settings.OpenWithFavorites = cleaned;
         }
+
+        if (settings.SavedFilters is null)
+            settings.SavedFilters = new List<SavedFilter>();
+        else
+        {
+            settings.SavedFilters = settings.SavedFilters
+                .Where(f => f is not null && !string.IsNullOrWhiteSpace(f.Name))
+                .Select(f => new SavedFilter
+                {
+                    Name = f.Name.Trim(),
+                    Query = f.Query?.Trim() ?? string.Empty
+                })
+                .Take(50)
+                .ToList();
+        }
     }
 }
 

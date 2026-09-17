@@ -6,12 +6,15 @@ namespace InstantFind.Services;
 
 /// <summary>
 /// Parses Instant Find query syntax: substrings, * ? wildcards, optional ext:pdf filters,
+/// type macros (doc:/img:/…), size:/dm: filters, Everything-style !NOT terms,
 /// optional directory path-scope (leading Windows path ending in \), Everything-like
 /// path terms (leading \), and optional regex body.
 /// </summary>
 public sealed class ParsedQuery
 {
     public List<string> Terms { get; } = new();
+    /// <summary>Exclusion terms (Everything-style <c>!term</c> / <c>!*.tmp</c>).</summary>
+    public List<string> NotTerms { get; } = new();
     public List<string> Extensions { get; } = new();
     public bool HasWildcards { get; set; }
     public string Raw { get; init; } = string.Empty;
@@ -28,12 +31,36 @@ public sealed class ParsedQuery
 
     /// <summary>Regex body after path-scope stripping. May be empty (path-only listing).</summary>
     public string RegexPattern { get; set; } = string.Empty;
+
+    /// <summary>Minimum size in bytes (inclusive), from <c>size:</c> filters.</summary>
+    public long? SizeMin { get; set; }
+    /// <summary>Maximum size in bytes (inclusive), from <c>size:</c> filters.</summary>
+    public long? SizeMax { get; set; }
+
+    /// <summary>Modified-time lower bound (UTC inclusive), from <c>dm:</c> filters.</summary>
+    public DateTime? ModifiedAfterUtc { get; set; }
+    /// <summary>Modified-time upper bound (UTC exclusive end-of-range), from <c>dm:</c> filters.</summary>
+    public DateTime? ModifiedBeforeUtc { get; set; }
+
+    public bool HasSizeFilter => SizeMin.HasValue || SizeMax.HasValue;
+    public bool HasDateFilter => ModifiedAfterUtc.HasValue || ModifiedBeforeUtc.HasValue;
+    public bool HasNotTerms => NotTerms.Count > 0;
 }
 
 public static class QueryParser
 {
     private static readonly Regex ExtFilter = new(
         @"ext:(?<ext>[A-Za-z0-9_+-]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>size:&gt;1mb / size:&lt;=100kb / size:1mb..10mb / size:500kb</summary>
+    private static readonly Regex SizeFilter = new(
+        @"\bsize:(?<spec>[^\s""]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>dm:today / dm:thisweek / dm:&gt;2024-01-01 / dm:2024-01-01..2024-12-31</summary>
+    private static readonly Regex DateModifiedFilter = new(
+        @"\bdm:(?<spec>[^\s""]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
@@ -70,21 +97,16 @@ public static class QueryParser
             working = remainder.TrimStart();
         }
 
+        // size: / dm: always extracted (including regex mode) so Filter popup tokens work with .*
+        working = ExtractSizeFilters(working, result);
+        working = ExtractDateFilters(working, result);
+
         if (useRegex)
         {
             result.UseRegex = true;
-            result.RegexPattern = working;
-            // Still allow ext: filters alongside regex body
-            foreach (Match m in ExtFilter.Matches(working))
-            {
-                var ext = m.Groups["ext"].Value.TrimStart('.').ToLowerInvariant();
-                if (!string.IsNullOrEmpty(ext) && !result.Extensions.Contains(ext))
-                    result.Extensions.Add(ext);
-            }
-            // Regex body keeps ext: text as part of the pattern unless we strip it —
-            // prefer leaving the full remainder as the regex (ext: is for non-regex mode).
-            // Clear extensions when useRegex so ext: is literal in the pattern.
-            result.Extensions.Clear();
+            // Expand type macros out of the regex body so doc: still filters by extension
+            working = ExpandMacros(working, result);
+            result.RegexPattern = working.Trim();
             return result;
         }
 
@@ -96,15 +118,27 @@ public static class QueryParser
         }
 
         working = ExtFilter.Replace(working, " ").Trim();
+        working = ExpandMacros(working, result);
 
         if (mode == MatchMode.LiteralWhitespace)
         {
             // Do not split on spaces — the whole remainder is one term (spaces must appear in the name).
+            // Leading ! still means NOT for the whole literal term.
             if (!string.IsNullOrEmpty(working))
             {
-                if (working.Contains('*') || working.Contains('?'))
-                    result.HasWildcards = true;
-                result.Terms.Add(working);
+                if (working.StartsWith('!') && working.Length > 1)
+                {
+                    var notTerm = working[1..];
+                    if (notTerm.Contains('*') || notTerm.Contains('?'))
+                        result.HasWildcards = true;
+                    result.NotTerms.Add(notTerm);
+                }
+                else
+                {
+                    if (working.Contains('*') || working.Contains('?'))
+                        result.HasWildcards = true;
+                    result.Terms.Add(working);
+                }
             }
             return result;
         }
@@ -113,6 +147,16 @@ public static class QueryParser
         {
             if (string.IsNullOrWhiteSpace(token))
                 continue;
+
+            if (token.StartsWith('!') && token.Length > 1)
+            {
+                var notTerm = token[1..];
+                if (notTerm.Contains('*') || notTerm.Contains('?'))
+                    result.HasWildcards = true;
+                result.NotTerms.Add(notTerm);
+                continue;
+            }
+
             if (token.Contains('*') || token.Contains('?'))
                 result.HasWildcards = true;
             result.Terms.Add(token);
@@ -208,14 +252,27 @@ public static class QueryParser
         string fullPath,
         string extension,
         bool matchCase = false,
-        bool wholeWord = false)
+        bool wholeWord = false,
+        long size = 0,
+        DateTime? modifiedUtc = null,
+        bool isDirectory = false)
     {
         if (!string.IsNullOrEmpty(query.PathScope)
             && !IsUnderPathScope(fullPath, query.PathScope, matchCase))
             return false;
 
+        if (!PassesSizeFilter(query, size, isDirectory))
+            return false;
+
+        if (!PassesDateFilter(query, modifiedUtc))
+            return false;
+
         if (query.UseRegex)
-            return MatchesRegex(query, name, fullPath, extension, matchCase);
+        {
+            if (!MatchesRegex(query, name, fullPath, extension, matchCase))
+                return false;
+            return !IsExcludedByNotTerms(query, name, fullPath, matchCase, wholeWord);
+        }
 
         if (query.Extensions.Count > 0)
         {
@@ -224,31 +281,105 @@ public static class QueryParser
                 return false;
         }
 
-        // Path-scope only (no terms): everything under the directory matches
+        // Path-scope / ext / size / date only (no positive terms): everything under filters matches
         if (query.Terms.Count == 0)
-            return query.Extensions.Count > 0
-                   || !string.IsNullOrEmpty(query.PathScope)
-                   || string.IsNullOrWhiteSpace(query.Raw);
+        {
+            bool structural =
+                query.Extensions.Count > 0
+                || !string.IsNullOrEmpty(query.PathScope)
+                || query.HasSizeFilter
+                || query.HasDateFilter
+                || query.HasNotTerms
+                || string.IsNullOrWhiteSpace(query.Raw);
+            if (!structural)
+                return false;
+            return !IsExcludedByNotTerms(query, name, fullPath, matchCase, wholeWord);
+        }
 
         var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
+        bool positivesOk;
         if (query.Mode == MatchMode.Or)
         {
+            positivesOk = false;
             foreach (var term in query.Terms)
             {
                 if (TermMatches(term, name, fullPath, comparison, wholeWord))
-                    return true;
+                {
+                    positivesOk = true;
+                    break;
+                }
             }
-            return false;
         }
-
-        // And and LiteralWhitespace: every term must match
-        foreach (var term in query.Terms)
+        else
         {
-            if (!TermMatches(term, name, fullPath, comparison, wholeWord))
-                return false;
+            // And and LiteralWhitespace: every term must match
+            positivesOk = true;
+            foreach (var term in query.Terms)
+            {
+                if (!TermMatches(term, name, fullPath, comparison, wholeWord))
+                {
+                    positivesOk = false;
+                    break;
+                }
+            }
         }
 
+        if (!positivesOk)
+            return false;
+
+        return !IsExcludedByNotTerms(query, name, fullPath, matchCase, wholeWord);
+    }
+
+    /// <summary>True when any <see cref="ParsedQuery.NotTerms"/> matches the file (should be excluded).</summary>
+    public static bool IsExcludedByNotTerms(
+        ParsedQuery query,
+        string name,
+        string fullPath,
+        bool matchCase = false,
+        bool wholeWord = false)
+    {
+        if (query.NotTerms.Count == 0)
+            return false;
+        var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        foreach (var term in query.NotTerms)
+        {
+            if (TermMatches(term, name, fullPath, comparison, wholeWord))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool PassesSizeFilter(ParsedQuery query, long size, bool isDirectory)
+    {
+        if (!query.HasSizeFilter)
+            return true;
+        // Directories have size 0 in the index — size filters apply to files only
+        if (isDirectory)
+            return false;
+        if (query.SizeMin.HasValue && size < query.SizeMin.Value)
+            return false;
+        if (query.SizeMax.HasValue && size > query.SizeMax.Value)
+            return false;
+        return true;
+    }
+
+    public static bool PassesDateFilter(ParsedQuery query, DateTime? modifiedUtc)
+    {
+        if (!query.HasDateFilter)
+            return true;
+        if (modifiedUtc is null)
+            return false;
+        var m = modifiedUtc.Value;
+        if (m.Kind == DateTimeKind.Unspecified)
+            m = DateTime.SpecifyKind(m, DateTimeKind.Utc);
+        else if (m.Kind == DateTimeKind.Local)
+            m = m.ToUniversalTime();
+
+        if (query.ModifiedAfterUtc.HasValue && m < query.ModifiedAfterUtc.Value)
+            return false;
+        if (query.ModifiedBeforeUtc.HasValue && m >= query.ModifiedBeforeUtc.Value)
+            return false;
         return true;
     }
 
@@ -688,6 +819,309 @@ public static class QueryParser
             sb.Append(c);
         }
         return $"\"{sb}\"";
+    }
+
+    /// <summary>Strip and apply <c>size:</c> tokens into <paramref name="query"/>.</summary>
+    public static string ExtractSizeFilters(string working, ParsedQuery query)
+    {
+        foreach (Match m in SizeFilter.Matches(working))
+        {
+            if (TryParseSizeSpec(m.Groups["spec"].Value, out var min, out var max))
+            {
+                if (min.HasValue)
+                    query.SizeMin = query.SizeMin.HasValue ? Math.Max(query.SizeMin.Value, min.Value) : min;
+                if (max.HasValue)
+                    query.SizeMax = query.SizeMax.HasValue ? Math.Min(query.SizeMax.Value, max.Value) : max;
+            }
+        }
+        return SizeFilter.Replace(working, " ").Trim();
+    }
+
+    /// <summary>Strip and apply <c>dm:</c> tokens into <paramref name="query"/>.</summary>
+    public static string ExtractDateFilters(string working, ParsedQuery query)
+    {
+        foreach (Match m in DateModifiedFilter.Matches(working))
+        {
+            if (TryParseDateSpec(m.Groups["spec"].Value, out var after, out var before))
+            {
+                if (after.HasValue)
+                    query.ModifiedAfterUtc = query.ModifiedAfterUtc.HasValue
+                        ? (after > query.ModifiedAfterUtc ? after : query.ModifiedAfterUtc)
+                        : after;
+                if (before.HasValue)
+                    query.ModifiedBeforeUtc = query.ModifiedBeforeUtc.HasValue
+                        ? (before < query.ModifiedBeforeUtc ? before : query.ModifiedBeforeUtc)
+                        : before;
+            }
+        }
+        return DateModifiedFilter.Replace(working, " ").Trim();
+    }
+
+    /// <summary>Expand <c>doc:</c>/<c>img:</c>/… macros into <see cref="ParsedQuery.Extensions"/>.</summary>
+    public static string ExpandMacros(string working, ParsedQuery query)
+    {
+        if (string.IsNullOrWhiteSpace(working))
+            return working ?? string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var token in Tokenize(working))
+        {
+            if (FileTypeMacros.TryResolveMacro(token, out var group) && group is not null)
+            {
+                foreach (var ext in group.Extensions)
+                {
+                    if (!query.Extensions.Contains(ext))
+                        query.Extensions.Add(ext);
+                }
+                continue;
+            }
+            if (sb.Length > 0) sb.Append(' ');
+            // Re-quote tokens that contain spaces
+            if (token.Contains(' '))
+            {
+                sb.Append('"');
+                sb.Append(token);
+                sb.Append('"');
+            }
+            else
+            {
+                sb.Append(token);
+            }
+        }
+        return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Parses size specs: <c>&gt;1mb</c>, <c>&lt;=100kb</c>, <c>1mb..10mb</c>, <c>500kb</c>.
+    /// Units: b, kb, mb, gb (case-insensitive). Binary (1024) multipliers.
+    /// </summary>
+    public static bool TryParseSizeSpec(string? spec, out long? minBytes, out long? maxBytes)
+    {
+        minBytes = null;
+        maxBytes = null;
+        if (string.IsNullOrWhiteSpace(spec))
+            return false;
+
+        var s = spec.Trim();
+        // Range: a..b
+        var dots = s.IndexOf("..", StringComparison.Ordinal);
+        if (dots >= 0)
+        {
+            var left = s[..dots].Trim().TrimStart('>', '=');
+            var right = s[(dots + 2)..].Trim().TrimStart('<', '=');
+            bool ok = false;
+            if (left.Length > 0 && TryParseSizeValue(left, out var lo))
+            {
+                minBytes = lo;
+                ok = true;
+            }
+            if (right.Length > 0 && TryParseSizeValue(right, out var hi))
+            {
+                maxBytes = hi;
+                ok = true;
+            }
+            return ok;
+        }
+
+        // Comparison operators
+        if (s.StartsWith(">=", StringComparison.Ordinal))
+        {
+            if (!TryParseSizeValue(s[2..], out var v)) return false;
+            minBytes = v;
+            return true;
+        }
+        if (s.StartsWith("<=", StringComparison.Ordinal))
+        {
+            if (!TryParseSizeValue(s[2..], out var v)) return false;
+            maxBytes = v;
+            return true;
+        }
+        if (s.StartsWith('>'))
+        {
+            if (!TryParseSizeValue(s[1..], out var v)) return false;
+            minBytes = v + 1; // exclusive >
+            return true;
+        }
+        if (s.StartsWith('<'))
+        {
+            if (!TryParseSizeValue(s[1..], out var v)) return false;
+            maxBytes = Math.Max(0, v - 1); // exclusive <
+            return true;
+        }
+
+        // Bare value → exact-ish: treat as min=max
+        if (!TryParseSizeValue(s, out var exact))
+            return false;
+        minBytes = exact;
+        maxBytes = exact;
+        return true;
+    }
+
+    public static bool TryParseSizeValue(string? text, out long bytes)
+    {
+        bytes = 0;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        var s = text.Trim().Replace("_", "").Replace(",", "");
+        // Split number + optional unit
+        int i = 0;
+        while (i < s.Length && (char.IsDigit(s[i]) || s[i] == '.'))
+            i++;
+        if (i == 0)
+            return false;
+        if (!double.TryParse(s[..i], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var num))
+            return false;
+        var unit = s[i..].Trim().ToLowerInvariant();
+        double mult = unit switch
+        {
+            "" or "b" or "byte" or "bytes" => 1,
+            "k" or "kb" or "kib" => 1024,
+            "m" or "mb" or "mib" => 1024d * 1024,
+            "g" or "gb" or "gib" => 1024d * 1024 * 1024,
+            "t" or "tb" or "tib" => 1024d * 1024 * 1024 * 1024,
+            _ => -1
+        };
+        if (mult < 0)
+            return false;
+        bytes = (long)Math.Round(num * mult);
+        if (bytes < 0) bytes = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Parses dm: specs: today, yesterday, thisweek, thismonth, thisyear,
+    /// &gt;YYYY-MM-DD, &lt;YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD.
+    /// Bounds are UTC based on local calendar days.
+    /// </summary>
+    public static bool TryParseDateSpec(string? spec, out DateTime? afterUtc, out DateTime? beforeUtc)
+    {
+        afterUtc = null;
+        beforeUtc = null;
+        if (string.IsNullOrWhiteSpace(spec))
+            return false;
+
+        var s = spec.Trim();
+        var nowLocal = DateTime.Now;
+        var todayLocal = nowLocal.Date;
+
+        switch (s.ToLowerInvariant())
+        {
+            case "today":
+                afterUtc = todayLocal.ToUniversalTime();
+                beforeUtc = todayLocal.AddDays(1).ToUniversalTime();
+                return true;
+            case "yesterday":
+                afterUtc = todayLocal.AddDays(-1).ToUniversalTime();
+                beforeUtc = todayLocal.ToUniversalTime();
+                return true;
+            case "thisweek":
+            {
+                int diff = ((int)todayLocal.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+                var monday = todayLocal.AddDays(-diff);
+                afterUtc = monday.ToUniversalTime();
+                beforeUtc = todayLocal.AddDays(1).ToUniversalTime();
+                return true;
+            }
+            case "thismonth":
+                afterUtc = new DateTime(todayLocal.Year, todayLocal.Month, 1, 0, 0, 0, DateTimeKind.Local).ToUniversalTime();
+                beforeUtc = todayLocal.AddDays(1).ToUniversalTime();
+                return true;
+            case "thisyear":
+                afterUtc = new DateTime(todayLocal.Year, 1, 1, 0, 0, 0, DateTimeKind.Local).ToUniversalTime();
+                beforeUtc = todayLocal.AddDays(1).ToUniversalTime();
+                return true;
+        }
+
+        var dots = s.IndexOf("..", StringComparison.Ordinal);
+        if (dots >= 0)
+        {
+            var left = s[..dots].Trim().TrimStart('>', '=');
+            var right = s[(dots + 2)..].Trim().TrimStart('<', '=');
+            bool ok = false;
+            if (left.Length > 0 && TryParseDateValue(left, out var lo))
+            {
+                afterUtc = lo;
+                ok = true;
+            }
+            if (right.Length > 0 && TryParseDateValue(right, out var hi))
+            {
+                beforeUtc = hi.AddDays(1); // inclusive end date
+                ok = true;
+            }
+            return ok;
+        }
+
+        if (s.StartsWith(">=", StringComparison.Ordinal))
+        {
+            if (!TryParseDateValue(s[2..], out var d)) return false;
+            afterUtc = d;
+            return true;
+        }
+        if (s.StartsWith("<=", StringComparison.Ordinal))
+        {
+            if (!TryParseDateValue(s[2..], out var d)) return false;
+            beforeUtc = d.AddDays(1);
+            return true;
+        }
+        if (s.StartsWith('>'))
+        {
+            if (!TryParseDateValue(s[1..], out var d)) return false;
+            afterUtc = d.AddDays(1);
+            return true;
+        }
+        if (s.StartsWith('<'))
+        {
+            if (!TryParseDateValue(s[1..], out var d)) return false;
+            beforeUtc = d;
+            return true;
+        }
+
+        // Bare date → that calendar day
+        if (!TryParseDateValue(s, out var day))
+            return false;
+        afterUtc = day;
+        beforeUtc = day.AddDays(1);
+        return true;
+    }
+
+    public static bool TryParseDateValue(string? text, out DateTime utcMidnightFromLocalDate)
+    {
+        utcMidnightFromLocalDate = default;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        var s = text.Trim();
+        if (DateTime.TryParseExact(s, new[] { "yyyy-MM-dd", "yyyy/MM/dd", "yyyyMMdd" },
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var localDate))
+        {
+            utcMidnightFromLocalDate = DateTime.SpecifyKind(localDate.Date, DateTimeKind.Local).ToUniversalTime();
+            return true;
+        }
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeLocal, out var parsed))
+        {
+            utcMidnightFromLocalDate = DateTime.SpecifyKind(parsed.Date, DateTimeKind.Local).ToUniversalTime();
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Formats Windows <see cref="System.IO.FileAttributes"/> as compact letters (R/H/S/A/D/C/E/L).
+    /// </summary>
+    public static string FormatAttributes(System.IO.FileAttributes attrs)
+    {
+        var sb = new StringBuilder(8);
+        if ((attrs & System.IO.FileAttributes.ReadOnly) != 0) sb.Append('R');
+        if ((attrs & System.IO.FileAttributes.Hidden) != 0) sb.Append('H');
+        if ((attrs & System.IO.FileAttributes.System) != 0) sb.Append('S');
+        if ((attrs & System.IO.FileAttributes.Archive) != 0) sb.Append('A');
+        if ((attrs & System.IO.FileAttributes.Directory) != 0) sb.Append('D');
+        if ((attrs & System.IO.FileAttributes.Compressed) != 0) sb.Append('C');
+        if ((attrs & System.IO.FileAttributes.Encrypted) != 0) sb.Append('E');
+        if ((attrs & System.IO.FileAttributes.ReparsePoint) != 0) sb.Append('L');
+        return sb.ToString();
     }
 
     private static IEnumerable<string> Tokenize(string input)

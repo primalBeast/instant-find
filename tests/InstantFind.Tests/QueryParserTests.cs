@@ -604,4 +604,207 @@ public class QueryParserTests
         Assert.False(QueryParser.Matches(q, "x72y.txt", @"C:\data\x72y.txt", "txt"));
     }
 
+    // ----- v1.0.13: NOT / macros / size / date -----
+
+    [Fact]
+    public void Not_excludes_matching_term()
+    {
+        var q = QueryParser.Parse("report !temp");
+        Assert.Contains("report", q.Terms);
+        Assert.Contains("temp", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report_temp.pdf", @"C:\docs\report_temp.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "temp_report.pdf", @"C:\docs\temp_report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Not_wildcard_excludes_extension()
+    {
+        var q = QueryParser.Parse("report !*.tmp");
+        Assert.Contains("report", q.Terms);
+        Assert.Contains("*.tmp", q.NotTerms);
+        Assert.True(q.HasWildcards);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report.tmp", @"C:\docs\report.tmp", "tmp"));
+    }
+
+    [Fact]
+    public void Not_only_excludes_without_positive_terms()
+    {
+        var q = QueryParser.Parse("!temp");
+        Assert.Empty(q.Terms);
+        Assert.Contains("temp", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "temp.pdf", @"C:\docs\temp.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Not_works_with_path_scope()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\ report !draft");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.Contains("report", q.Terms);
+        Assert.Contains("draft", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\Projects\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report_draft.pdf", @"C:\Projects\report_draft.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report.pdf", @"C:\Other\report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Not_works_with_Or_mode()
+    {
+        var q = QueryParser.Parse("annual report !budget", MatchMode.Or);
+        Assert.True(QueryParser.Matches(q, "annual.xlsx", @"C:\finance\annual.xlsx", "xlsx"));
+        Assert.True(QueryParser.Matches(q, "report.xlsx", @"C:\finance\report.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "budget_report.xlsx", @"C:\finance\budget_report.xlsx", "xlsx"));
+    }
+
+    [Fact]
+    public void Macro_doc_expands_to_document_extensions()
+    {
+        var q = QueryParser.Parse("invoice doc:");
+        Assert.Contains("pdf", q.Extensions);
+        Assert.Contains("docx", q.Extensions);
+        Assert.Contains("invoice", q.Terms);
+        Assert.True(QueryParser.Matches(q, "invoice.pdf", @"C:\invoice.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "invoice.png", @"C:\invoice.png", "png"));
+    }
+
+    [Theory]
+    [InlineData("img:", "png", true)]
+    [InlineData("image:", "jpg", true)]
+    [InlineData("vid:", "mp4", true)]
+    [InlineData("video:", "mkv", true)]
+    [InlineData("audio:", "mp3", true)]
+    [InlineData("zip:", "rar", true)]
+    [InlineData("archive:", "7z", true)]
+    [InlineData("code:", "cs", true)]
+    [InlineData("xls:", "xlsx", true)]
+    [InlineData("ppt:", "pptx", true)]
+    [InlineData("exe:", "exe", true)]
+    [InlineData("font:", "ttf", true)]
+    [InlineData("iso:", "iso", true)]
+    public void Macro_aliases_expand(string macro, string ext, bool expected)
+    {
+        var q = QueryParser.Parse(macro);
+        Assert.Equal(expected, q.Extensions.Contains(ext));
+        Assert.True(QueryParser.Matches(q, $"file.{ext}", $@"C:\file.{ext}", ext));
+    }
+
+    [Fact]
+    public void Macro_with_Not_and_path_scope()
+    {
+        var q = QueryParser.Parse(@"C:\docs\ doc: !draft");
+        Assert.Equal(@"C:\docs\", q.PathScope);
+        Assert.Contains("pdf", q.Extensions);
+        Assert.Contains("draft", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "notes.pdf", @"C:\docs\notes.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "draft.pdf", @"C:\docs\draft.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "notes.pdf", @"C:\other\notes.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Size_greater_than_1mb()
+    {
+        Assert.True(QueryParser.TryParseSizeSpec(">1mb", out var min, out var max));
+        Assert.Equal(1024L * 1024 + 1, min);
+        Assert.Null(max);
+
+        var q = QueryParser.Parse("size:>1mb");
+        Assert.True(q.HasSizeFilter);
+        Assert.True(QueryParser.Matches(q, "big.bin", @"C:\big.bin", "bin", size: 2_000_000));
+        Assert.False(QueryParser.Matches(q, "small.bin", @"C:\small.bin", "bin", size: 100));
+        Assert.False(QueryParser.Matches(q, "folder", @"C:\folder", "", size: 0, isDirectory: true));
+    }
+
+    [Fact]
+    public void Size_range_1mb_to_10mb()
+    {
+        var q = QueryParser.Parse("report size:1mb..10mb");
+        Assert.Contains("report", q.Terms);
+        Assert.Equal(1024L * 1024, q.SizeMin);
+        Assert.Equal(10L * 1024 * 1024, q.SizeMax);
+        Assert.True(QueryParser.Matches(q, "report.bin", @"C:\report.bin", "bin", size: 5_000_000));
+        Assert.False(QueryParser.Matches(q, "report.bin", @"C:\report.bin", "bin", size: 100));
+        Assert.False(QueryParser.Matches(q, "report.bin", @"C:\report.bin", "bin", size: 20_000_000));
+    }
+
+    [Fact]
+    public void Date_today_preset()
+    {
+        var q = QueryParser.Parse("dm:today");
+        Assert.True(q.HasDateFilter);
+        Assert.NotNull(q.ModifiedAfterUtc);
+        Assert.NotNull(q.ModifiedBeforeUtc);
+        var now = DateTime.UtcNow;
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\a.txt", "txt", modifiedUtc: now));
+        Assert.False(QueryParser.Matches(q, "old.txt", @"C:\old.txt", "txt", modifiedUtc: now.AddDays(-3)));
+    }
+
+    [Fact]
+    public void Date_range_explicit()
+    {
+        var q = QueryParser.Parse("dm:2024-01-01..2024-12-31");
+        Assert.True(q.HasDateFilter);
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\a.txt", "txt",
+            modifiedUtc: new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Utc)));
+        Assert.False(QueryParser.Matches(q, "a.txt", @"C:\a.txt", "txt",
+            modifiedUtc: new DateTime(2023, 6, 15, 12, 0, 0, DateTimeKind.Utc)));
+    }
+
+    [Fact]
+    public void Size_and_date_combined_with_terms()
+    {
+        var q = QueryParser.Parse("report size:>100kb dm:thisyear");
+        Assert.Contains("report", q.Terms);
+        Assert.True(q.HasSizeFilter);
+        Assert.True(q.HasDateFilter);
+        Assert.DoesNotContain("size:", q.Terms);
+        Assert.DoesNotContain("dm:", q.Terms);
+    }
+
+    [Fact]
+    public void PathScope_v1012_still_works_with_Not()
+    {
+        var q = QueryParser.Parse(@"C:\Logs  \72 !temp");
+        Assert.Equal(@"C:\Logs\", q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.Contains("temp", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "72folder", @"C:\Logs\72folder", ""));
+        Assert.False(QueryParser.Matches(q, "72temp", @"C:\Logs\72temp", ""));
+    }
+
+    [Fact]
+    public void FormatAttributes_letters()
+    {
+        var attrs = System.IO.FileAttributes.ReadOnly | System.IO.FileAttributes.Hidden | System.IO.FileAttributes.Archive;
+        var text = QueryParser.FormatAttributes(attrs);
+        Assert.Contains("R", text);
+        Assert.Contains("H", text);
+        Assert.Contains("A", text);
+    }
+
+    [Fact]
+    public void QueryFilterTokens_upsert_and_clear()
+    {
+        var q = "report";
+        q = QueryFilterTokens.UpsertSize(q, ">1mb");
+        Assert.Contains("size:>1mb", q);
+        q = QueryFilterTokens.UpsertDate(q, "today");
+        Assert.Contains("dm:today", q);
+        q = QueryFilterTokens.UpsertTypeMacro(q, "doc");
+        Assert.Contains("doc:", q);
+        Assert.True(QueryFilterTokens.HasStructuredFilters(q));
+        q = QueryFilterTokens.ClearStructured(q);
+        Assert.Equal("report", q);
+        Assert.False(QueryFilterTokens.HasStructuredFilters(q));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_ignores_NotTerms_leaves_when_wildcards_in_Not()
+    {
+        var q = QueryParser.Parse("hello !*.tmp");
+        Assert.True(q.HasWildcards);
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
 }

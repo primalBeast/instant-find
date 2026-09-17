@@ -69,12 +69,15 @@ public sealed class IndexDatabase : IDisposable
                 extension TEXT NOT NULL,
                 size INTEGER NOT NULL DEFAULT 0,
                 modified_utc TEXT NOT NULL,
-                is_directory INTEGER NOT NULL DEFAULT 0
+                is_directory INTEGER NOT NULL DEFAULT 0,
+                attributes TEXT NOT NULL DEFAULT ''
             );
 
             CREATE INDEX IF NOT EXISTS idx_files_extension ON files(extension);
             CREATE INDEX IF NOT EXISTS idx_files_directory ON files(directory);
             CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+            CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
+            CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_utc);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
                 name,
@@ -98,6 +101,8 @@ public sealed class IndexDatabase : IDisposable
             END;
             """;
         cmd.ExecuteNonQuery();
+
+        EnsureSchemaMigrations();
     }
 
     /// <summary>Close the SQLite connection without disposing the IndexDatabase wrapper.</summary>
@@ -167,15 +172,16 @@ public sealed class IndexDatabase : IDisposable
             using var cmd = Conn().CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
-                INSERT INTO files (name, path, directory, extension, size, modified_utc, is_directory)
-                VALUES ($name, $path, $directory, $extension, $size, $modified, $isDir)
+                INSERT INTO files (name, path, directory, extension, size, modified_utc, is_directory, attributes)
+                VALUES ($name, $path, $directory, $extension, $size, $modified, $isDir, $attrs)
                 ON CONFLICT(path) DO UPDATE SET
                     name = excluded.name,
                     directory = excluded.directory,
                     extension = excluded.extension,
                     size = excluded.size,
                     modified_utc = excluded.modified_utc,
-                    is_directory = excluded.is_directory;
+                    is_directory = excluded.is_directory,
+                    attributes = excluded.attributes;
                 """;
             var pName = cmd.Parameters.Add("$name", SqliteType.Text);
             var pPath = cmd.Parameters.Add("$path", SqliteType.Text);
@@ -184,6 +190,7 @@ public sealed class IndexDatabase : IDisposable
             var pSize = cmd.Parameters.Add("$size", SqliteType.Integer);
             var pMod = cmd.Parameters.Add("$modified", SqliteType.Text);
             var pIsDir = cmd.Parameters.Add("$isDir", SqliteType.Integer);
+            var pAttrs = cmd.Parameters.Add("$attrs", SqliteType.Text);
 
             for (int i = 0; i < entries.Count; i++)
             {
@@ -199,6 +206,7 @@ public sealed class IndexDatabase : IDisposable
                 pSize.Value = e.Size;
                 pMod.Value = e.ModifiedUtc.ToString("o");
                 pIsDir.Value = e.IsDirectory ? 1 : 0;
+                pAttrs.Value = e.AttributesText ?? string.Empty;
                 cmd.ExecuteNonQuery();
             }
 
@@ -363,9 +371,10 @@ public sealed class IndexDatabase : IDisposable
         if (options.EnabledDrivePrefixes.Count == 0)
             return Array.Empty<FileEntry>();
 
-        // Match Case / Whole Word / wildcards / regex → leave FTS.
+        // Match Case / Whole Word / wildcards / regex / NOT → leave FTS.
         // PathScope alone does NOT leave FTS — keep FTS + SQL path prefix filter.
-        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards || query.UseRegex;
+        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards
+                        || query.UseRegex || query.HasNotTerms;
         if (leaveFts)
             return SearchWithLike(query, maxResults, includeDirectories, options);
 
@@ -379,7 +388,7 @@ public sealed class IndexDatabase : IDisposable
         cmd.CommandTimeout = 60; // always finish; never hang the UI spinner forever
         var sql = new System.Text.StringBuilder();
         sql.Append("""
-            SELECT f.id, f.name, f.path, f.directory, f.extension, f.size, f.modified_utc, f.is_directory
+            SELECT f.id, f.name, f.path, f.directory, f.extension, f.size, f.modified_utc, f.is_directory, f.attributes
             FROM files f
             """);
 
@@ -408,6 +417,7 @@ public sealed class IndexDatabase : IDisposable
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "f.");
         AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "f.");
+        AppendSizeDateFilters(where, cmd, query, alias: "f.");
 
         // Empty query with only ext: or completely empty — allow browsing limited set
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
@@ -423,8 +433,8 @@ public sealed class IndexDatabase : IDisposable
         try
         {
             using var reader = cmd.ExecuteReader();
-            // Plain FTS: skip redundant per-row Matches (no case/wholeword/wildcards/regex).
-            // PathScope / extensions are already applied in SQL.
+            // Plain FTS: skip redundant per-row Matches when filters are fully in SQL.
+            // Size/date/ext/path are in SQL; NOT terms leave FTS above.
             while (reader.Read())
             {
                 var entry = ReadEntry(reader);
@@ -457,7 +467,7 @@ public sealed class IndexDatabase : IDisposable
         cmd.CommandTimeout = 60; // always finish; never hang the UI spinner forever
         var sql = new System.Text.StringBuilder();
         sql.Append("""
-            SELECT id, name, path, directory, extension, size, modified_utc, is_directory
+            SELECT id, name, path, directory, extension, size, modified_utc, is_directory, attributes
             FROM files
             """);
 
@@ -566,11 +576,12 @@ public sealed class IndexDatabase : IDisposable
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "");
         AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "");
+        AppendSizeDateFilters(where, cmd, query, alias: "");
 
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
             return results;
 
-        // Need at least drive/path/ext/term filter
+        // Need at least drive/path/ext/term/size/date filter
         if (where.Count == 0)
             return results;
 
@@ -599,10 +610,12 @@ public sealed class IndexDatabase : IDisposable
         {
             var entry = ReadEntry(reader);
             // Refine with in-memory matcher (wildcards / case / whole-word / regex / path scope)
-            if (query.Terms.Count > 0 || query.Extensions.Count > 0 || query.UseRegex
-                || !string.IsNullOrEmpty(query.PathScope))
+            if (query.Terms.Count > 0 || query.NotTerms.Count > 0 || query.Extensions.Count > 0
+                || query.UseRegex || !string.IsNullOrEmpty(query.PathScope)
+                || query.HasSizeFilter || query.HasDateFilter)
             {
-                if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
+                if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension,
+                        options.MatchCase, options.WholeWord, entry.Size, entry.ModifiedUtc, entry.IsDirectory))
                     continue;
             }
 
@@ -673,7 +686,7 @@ public sealed class IndexDatabase : IDisposable
 
     private static FileEntry ReadEntry(SqliteDataReader reader)
     {
-        return new FileEntry
+        var entry = new FileEntry
         {
             Id = reader.GetInt64(0),
             Name = reader.GetString(1),
@@ -684,6 +697,71 @@ public sealed class IndexDatabase : IDisposable
             ModifiedUtc = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
             IsDirectory = reader.GetInt64(7) != 0
         };
+        if (reader.FieldCount > 8 && !reader.IsDBNull(8))
+            entry.AttributesText = reader.GetString(8);
+        return entry;
+    }
+
+    /// <summary>Add attributes column + size/modified indexes for DBs created before v1.0.13.</summary>
+    private void EnsureSchemaMigrations()
+    {
+        try
+        {
+            using var cmd = Conn().CreateCommand();
+            cmd.CommandText = "PRAGMA table_info(files);";
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                    cols.Add(reader.GetString(1));
+            }
+            if (!cols.Contains("attributes"))
+            {
+                using var alter = Conn().CreateCommand();
+                alter.CommandText = "ALTER TABLE files ADD COLUMN attributes TEXT NOT NULL DEFAULT '';";
+                alter.ExecuteNonQuery();
+            }
+            using var idx = Conn().CreateCommand();
+            idx.CommandText = """
+                CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
+                CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_utc);
+                """;
+            idx.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Best-effort migration
+        }
+    }
+
+    private static void AppendSizeDateFilters(
+        List<string> where,
+        SqliteCommand cmd,
+        ParsedQuery query,
+        string alias)
+    {
+        if (query.SizeMin.HasValue || query.SizeMax.HasValue)
+            where.Add($"{alias}is_directory = 0");
+        if (query.SizeMin.HasValue)
+        {
+            where.Add($"{alias}size >= $sizeMin");
+            cmd.Parameters.AddWithValue("$sizeMin", query.SizeMin.Value);
+        }
+        if (query.SizeMax.HasValue)
+        {
+            where.Add($"{alias}size <= $sizeMax");
+            cmd.Parameters.AddWithValue("$sizeMax", query.SizeMax.Value);
+        }
+        if (query.ModifiedAfterUtc.HasValue)
+        {
+            where.Add($"{alias}modified_utc >= $dmAfter");
+            cmd.Parameters.AddWithValue("$dmAfter", query.ModifiedAfterUtc.Value.ToString("o"));
+        }
+        if (query.ModifiedBeforeUtc.HasValue)
+        {
+            where.Add($"{alias}modified_utc < $dmBefore");
+            cmd.Parameters.AddWithValue("$dmBefore", query.ModifiedBeforeUtc.Value.ToString("o"));
+        }
     }
 
     private static void TryDeleteSqliteFiles(string dbPath)

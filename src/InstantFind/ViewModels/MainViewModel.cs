@@ -36,6 +36,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isContextMenuOpen;
     private bool _silentRefreshPending;
     private FileEntry? _contextTarget;
+    private bool _isFilterPopupOpen;
+    private bool _showExtensionColumn;
+    private bool _showAttributesColumn;
+    private string _newFilterName = string.Empty;
 
     public MainViewModel()
     {
@@ -61,6 +65,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OpenWithFavorites = new ObservableCollection<OpenWithFavorite>(
             (_settings.OpenWithFavorites ?? new List<string>())
                 .Select(p => new OpenWithFavorite(p)));
+        SavedFilters = new ObservableCollection<SavedFilter>(
+            _settings.SavedFilters ?? new List<SavedFilter>());
+        _showExtensionColumn = _settings.ShowExtensionColumn;
+        _showAttributesColumn = _settings.ShowAttributesColumn;
 
         _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _debounce.Tick += (_, _) =>
@@ -89,6 +97,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _ => ActionTarget is not null && !ActionTarget.IsDirectory);
         IndexButtonCommand = new RelayCommand(_ => OnIndexButton());
         ClearQueryCommand = new RelayCommand(_ => ClearQuery());
+        ToggleFilterPopupCommand = new RelayCommand(_ => IsFilterPopupOpen = !IsFilterPopupOpen);
+        ApplySizeFilterCommand = new RelayCommand(p => ApplySizeFilter(p as string));
+        ApplyDateFilterCommand = new RelayCommand(p => ApplyDateFilter(p as string));
+        ApplyTypeFilterCommand = new RelayCommand(p => ApplyTypeFilter(p as string));
+        ClearStructuredFiltersCommand = new RelayCommand(_ => ClearStructuredFilters());
+        SaveCurrentFilterCommand = new RelayCommand(_ => SaveCurrentFilter(), _ => !string.IsNullOrWhiteSpace(NewFilterName) && !string.IsNullOrWhiteSpace(Query));
+        ActivateSavedFilterCommand = new RelayCommand(p => ActivateSavedFilter(p as SavedFilter));
+        DeleteSavedFilterCommand = new RelayCommand(p => DeleteSavedFilter(p as SavedFilter));
+        ToggleExtensionColumnCommand = new RelayCommand(_ => ShowExtensionColumn = !ShowExtensionColumn);
+        ToggleAttributesColumnCommand = new RelayCommand(_ => ShowAttributesColumn = !ShowAttributesColumn);
 
         var count = _db.Count();
         if (count > 0)
@@ -110,6 +128,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<FileEntry> Results { get; }
     public ObservableCollection<DriveChip> DriveChips { get; }
     public ObservableCollection<OpenWithFavorite> OpenWithFavorites { get; }
+    public ObservableCollection<SavedFilter> SavedFilters { get; }
+    public IReadOnlyList<FileTypeMacros.TypeGroup> TypeFilterGroups { get; } = FileTypeMacros.Groups;
 
     public event Action? FocusSearchRequested;
 
@@ -120,6 +140,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _query, value))
             {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
                 // Show spinner as soon as the query changes / debounce starts
                 if (!string.IsNullOrWhiteSpace(value))
                 {
@@ -314,6 +335,69 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand ChooseOpenWithAppCommand { get; }
     public ICommand IndexButtonCommand { get; }
     public ICommand ClearQueryCommand { get; }
+    public ICommand ToggleFilterPopupCommand { get; }
+    public ICommand ApplySizeFilterCommand { get; }
+    public ICommand ApplyDateFilterCommand { get; }
+    public ICommand ApplyTypeFilterCommand { get; }
+    public ICommand ClearStructuredFiltersCommand { get; }
+    public ICommand SaveCurrentFilterCommand { get; }
+    public ICommand ActivateSavedFilterCommand { get; }
+    public ICommand DeleteSavedFilterCommand { get; }
+    public ICommand ToggleExtensionColumnCommand { get; }
+    public ICommand ToggleAttributesColumnCommand { get; }
+
+    public bool IsFilterPopupOpen
+    {
+        get => _isFilterPopupOpen;
+        set => Set(ref _isFilterPopupOpen, value);
+    }
+
+    /// <summary>True when the query contains size:/dm:/type-macro tokens.</summary>
+    public bool HasActiveFilters => QueryFilterTokens.HasStructuredFilters(Query);
+
+    public bool ShowExtensionColumn
+    {
+        get => _showExtensionColumn;
+        set
+        {
+            if (Set(ref _showExtensionColumn, value))
+            {
+                _settings.ShowExtensionColumn = value;
+                PersistSettings();
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ExtensionColumnVisibility)));
+            }
+        }
+    }
+
+    public bool ShowAttributesColumn
+    {
+        get => _showAttributesColumn;
+        set
+        {
+            if (Set(ref _showAttributesColumn, value))
+            {
+                _settings.ShowAttributesColumn = value;
+                PersistSettings();
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AttributesColumnVisibility)));
+            }
+        }
+    }
+
+    public System.Windows.Visibility ExtensionColumnVisibility =>
+        ShowExtensionColumn ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+
+    public System.Windows.Visibility AttributesColumnVisibility =>
+        ShowAttributesColumn ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+
+    public string NewFilterName
+    {
+        get => _newFilterName;
+        set
+        {
+            if (Set(ref _newFilterName, value))
+                CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     public string IndexedRootsDisplay =>
         _settings.IndexedRoots.Count == 0
@@ -430,6 +514,73 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Query = string.Empty;
         FocusSearchRequested?.Invoke();
+    }
+
+    private void ApplySizeFilter(string? spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) return;
+        Query = QueryFilterTokens.UpsertSize(Query, spec);
+        IsFilterPopupOpen = false;
+        FocusSearchRequested?.Invoke();
+    }
+
+    private void ApplyDateFilter(string? spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) return;
+        Query = QueryFilterTokens.UpsertDate(Query, spec);
+        IsFilterPopupOpen = false;
+        FocusSearchRequested?.Invoke();
+    }
+
+    private void ApplyTypeFilter(string? macroKey)
+    {
+        if (string.IsNullOrWhiteSpace(macroKey)) return;
+        Query = QueryFilterTokens.UpsertTypeMacro(Query, macroKey);
+        IsFilterPopupOpen = false;
+        FocusSearchRequested?.Invoke();
+    }
+
+    private void ClearStructuredFilters()
+    {
+        Query = QueryFilterTokens.ClearStructured(Query);
+        FocusSearchRequested?.Invoke();
+    }
+
+    private void SaveCurrentFilter()
+    {
+        var name = NewFilterName.Trim();
+        if (string.IsNullOrEmpty(name) || string.IsNullOrWhiteSpace(Query))
+            return;
+        var existing = SavedFilters.FirstOrDefault(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            existing.Query = Query;
+        else
+            SavedFilters.Insert(0, new SavedFilter { Name = name, Query = Query });
+        SyncSavedFiltersToSettings();
+        PersistSettings();
+        NewFilterName = string.Empty;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SavedFilters)));
+    }
+
+    private void ActivateSavedFilter(SavedFilter? filter)
+    {
+        if (filter is null || string.IsNullOrWhiteSpace(filter.Query)) return;
+        Query = filter.Query;
+        IsFilterPopupOpen = false;
+        FocusSearchRequested?.Invoke();
+    }
+
+    private void DeleteSavedFilter(SavedFilter? filter)
+    {
+        if (filter is null) return;
+        SavedFilters.Remove(filter);
+        SyncSavedFiltersToSettings();
+        PersistSettings();
+    }
+
+    private void SyncSavedFiltersToSettings()
+    {
+        _settings.SavedFilters = SavedFilters.ToList();
     }
 
     private SearchOptions BuildSearchOptions()
@@ -1025,7 +1176,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _settings.MatchCase = MatchCase;
         _settings.WholeWord = WholeWord;
         _settings.UseRegex = UseRegex;
+        _settings.ShowExtensionColumn = ShowExtensionColumn;
+        _settings.ShowAttributesColumn = ShowAttributesColumn;
         SyncOpenWithFavoritesToSettings();
+        SyncSavedFiltersToSettings();
         _settingsService.Save(_settings);
     }
 

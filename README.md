@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.12) | https://github.com/primalBeast/instant-find/releases/download/v1.0.12/InstantFind-win-x64.zip |
+| Direct zip (v1.0.13) | https://github.com/primalBeast/instant-find/releases/download/v1.0.13/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -40,8 +40,16 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.12)
+## Features (v1.0.13)
 
+- **NOT / Filter popup / size·date / macros / columns (v1.0.13)**:
+  - **NOT**: Everything-style `!term` / `!*.tmp` excludes matches (works with And/Or, path scope, macros).
+  - **Filter** button (left of And/Or): anchored popup (app theme) with Size / Date modified / Type / Saved filters. Active filters highlight the button; **Clear filters** removes `size:`, `dm:`, and type macros.
+  - **Size query**: `size:>1mb`, `size:<100kb`, `size:1mb..10mb` (units b/kb/mb/gb).
+  - **Date modified**: `dm:today`, `dm:yesterday`, `dm:thisweek`, `dm:thismonth`, `dm:thisyear`, `dm:2024-01-01..2024-12-31`, `dm:>2024-06-01`.
+  - **Type macros**: `doc:`, `img:`/`image:`, `vid:`/`video:`, `audio:`, `zip:`/`archive:`, `code:`, `xls:`, `ppt:`, `exe:`, `font:`, `iso:` — expand to common extension sets (same as Filter → Type).
+  - **Saved filters**: name + save current query; one-click activate; persisted in `settings.json`.
+  - **Extra columns**: context menu → Show Extension / Show Attributes (R/H/S/A/… from index or live `File.GetAttributes`).
 - **Path scope + path term spaces (v1.0.12)**: `C:\Logs  \72` (spaces, no trailing `\` after the folder) scopes to `C:\Logs\` and applies Everything-like segment prefix `\72`. Also `C:\Logs\`, `C:\Logs\ \72` / `C:\Logs\\72`, global `\72`, and normal name search under a scoped path. Search always completes (spinner off); silent refresh no longer orphans in-flight searches.
 - **Path term `\72` (v1.0.11)**: Everything-like — a term starting with `\` matches a **path/directory segment** that **starts with** the rest (e.g. `\72` hits `C:\data\72folder\…` and `C:\docs\72report.txt`, but not bare-name FTS that ignores `\` and would match `6728` / `x72y`). Leaves FTS; SQL `LIKE` on `path` only. Drive path-scope unchanged: `C:\foo\` still scopes.
 - **App icon (v1.0.10)**: Windows exe / window icon from `Assets/app.ico` (multi-size). Source art: ![Instant Find icon](src/InstantFind/Assets/app-icon.png)
@@ -62,21 +70,42 @@ Settings and the index database live under:
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, `.*` Regex, then the query box
 - Match Case, Whole Word, wildcards, Regex, or terms with FTS separators (`_` / `-` / other non-alphanumeric) leave FTS and use SQL `LIKE` / in-memory filter (still capped by `maxResults`). Path scope alone keeps FTS + SQL path prefix when terms are FTS-safe (v1.0.8 / v1.0.10)
-- Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index, not live disk)
+- Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index); optional **Extension** / **Attributes** via context menu
 - Context menu: Open, Open Containing Folder, **Open with…** (favorites + choose .exe), **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
 - Filters:
   - Substring match via FTS5 (case-insensitive, unless Match Case / Whole Word / Regex)
   - Wildcards `*` and `?` via SQL `LIKE` (e.g. `D*.pdf`, `*.pdf`, `test?.txt`)
+  - NOT: `!term` / `!*.tmp` excludes matches
   - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
+  - Type macros: `doc:`, `img:`, `vid:`, `audio:`, `zip:`, `code:`, …
+  - Size: `size:>1mb`, `size:1mb..10mb`
+  - Date modified: `dm:today`, `dm:thisyear`, `dm:2024-01-01..2024-12-31`
   - Regex (`.*` toggle): .NET regex against filename (see above)
   - Path scope: leading `X:\dir\` prefix restricts hits to that directory
   - Path term: leading `\` (e.g. `\72`) matches path segments that start with the rest
+  - Filter popup (search bar) for size / date / type / saved filters
 - Parallel multi-root indexing with progress status
 - Skips inaccessible directories instead of failing
 - **Size & Date Modified (v1.0.6)**: shown from the **SQLite index** (set at crawl / FileWatcher `IndexSinglePath`), not live disk on every search. Silent refresh and re-search now update Size/Modified **in place** when paths are unchanged but metadata changed (so the grid repaints without clearing selection / context menu)
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
+
+## Query syntax (v1.0.13)
+
+| Syntax | Meaning |
+|--------|---------|
+| `report budget` | And (default): all terms |
+| `report` + Or checked | Any term |
+| `!temp` / `report !*.tmp` | Exclude term / wildcard |
+| `ext:pdf` | Extension filter |
+| `doc:` `img:` `vid:` `audio:` `zip:` `code:` … | Type macros → extension sets |
+| `size:>1mb` `size:<100kb` `size:1mb..10mb` | Size filter (files only) |
+| `dm:today` `dm:thisweek` `dm:thisyear` | Date-modified presets |
+| `dm:2024-01-01..2024-12-31` | Date-modified range |
+| `C:\Work\` | Path scope (trailing `\`) |
+| `\72` | Path segment prefix (Everything-like) |
+| `.*` toggle | .NET regex on filename |
 
 ## Build from source
 
@@ -104,8 +133,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.12 && git push origin v1.0.12`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.12`
+1. **Tag** — push a version tag: `git tag v1.0.13 && git push origin v1.0.13`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.13`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

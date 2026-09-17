@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -23,8 +24,34 @@ public partial class MainWindow : Window
             SearchBox.Focus();
             SearchBox.SelectAll();
         };
-        Closed += (_, _) => _vm.Dispose();
-        Loaded += (_, _) => SearchBox.Focus();
+        _vm.PropertyChanged += Vm_PropertyChanged;
+        Closed += (_, _) =>
+        {
+            _vm.PropertyChanged -= Vm_PropertyChanged;
+            _vm.Dispose();
+        };
+        Loaded += (_, _) =>
+        {
+            SyncColumnVisibility();
+            SearchBox.Focus();
+        };
+    }
+
+    private void Vm_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.ShowExtensionColumn)
+            or nameof(MainViewModel.ShowAttributesColumn)
+            or nameof(MainViewModel.ExtensionColumnVisibility)
+            or nameof(MainViewModel.AttributesColumnVisibility))
+        {
+            SyncColumnVisibility();
+        }
+    }
+
+    private void SyncColumnVisibility()
+    {
+        ExtensionColumn.Visibility = _vm.ShowExtensionColumn ? Visibility.Visible : Visibility.Collapsed;
+        AttributesColumn.Visibility = _vm.ShowAttributesColumn ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ResultsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -125,6 +152,12 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Escape)
         {
+            if (_vm.IsFilterPopupOpen)
+            {
+                _vm.IsFilterPopupOpen = false;
+                e.Handled = true;
+                return;
+            }
             SearchBox.Focus();
             SearchBox.SelectAll();
             e.Handled = true;

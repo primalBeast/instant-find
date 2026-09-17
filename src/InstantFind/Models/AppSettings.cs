@@ -32,6 +32,15 @@ public sealed class AppSettings
     /// </summary>
     public List<string> OpenWithFavorites { get; set; } = new();
 
+    /// <summary>Named reusable filter queries (Filter popup).</summary>
+    public List<SavedFilter> SavedFilters { get; set; } = new();
+
+    /// <summary>Show Extension column in results grid.</summary>
+    public bool ShowExtensionColumn { get; set; }
+
+    /// <summary>Show Attributes column in results grid.</summary>
+    public bool ShowAttributesColumn { get; set; }
+
     public List<string> ExcludedDirectoryNames { get; set; } = new()
     {
         "$Recycle.Bin",

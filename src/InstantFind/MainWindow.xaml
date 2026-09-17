@@ -91,6 +91,7 @@
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
         <Button Grid.Column="0"
@@ -169,15 +170,193 @@
                  VerticalContentAlignment="Center"
                  Margin="0,0,8,0"/>
 
+        <!-- Filter button + anchored popup (left of And/Or) -->
+        <Grid Grid.Column="5" VerticalAlignment="Center" Margin="0,0,8,0">
+          <ToggleButton x:Name="FilterButton"
+                        Content="Filter"
+                        IsChecked="{Binding IsFilterPopupOpen, Mode=TwoWay}"
+                        MinWidth="52" Height="22"
+                        Padding="8,2"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        HorizontalContentAlignment="Center"
+                        Background="{StaticResource PanelBrush}"
+                        Foreground="{StaticResource FgBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        Cursor="Hand"
+                        ToolTip="Size, date, type, and saved filters"
+                        VerticalAlignment="Center">
+            <ToggleButton.Style>
+              <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasActiveFilters}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="Foreground" Value="White"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ToggleButton.Style>
+          </ToggleButton>
+          <Popup IsOpen="{Binding IsFilterPopupOpen, Mode=TwoWay}"
+                 PlacementTarget="{Binding ElementName=FilterButton}"
+                 Placement="Left"
+                 HorizontalOffset="-4"
+                 StaysOpen="False"
+                 AllowsTransparency="True"
+                 PopupAnimation="Fade">
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="12"
+                    MinWidth="280" MaxWidth="340"
+                    MaxHeight="460">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.45" Color="#000000"/>
+              </Border.Effect>
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                  <DockPanel Margin="0,0,0,8">
+                    <TextBlock Text="Filters" FontWeight="SemiBold" FontSize="13"
+                               Foreground="{StaticResource FgBrush}"
+                               VerticalAlignment="Center"/>
+                    <Button DockPanel.Dock="Right"
+                            Content="Clear filters"
+                            Command="{Binding ClearStructuredFiltersCommand}"
+                            Padding="8,2"
+                            FontSize="11"
+                            Background="Transparent"
+                            Foreground="{StaticResource AccentBrush}"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            HorizontalAlignment="Right"/>
+                  </DockPanel>
+
+                  <TextBlock Text="Size" FontWeight="SemiBold" FontSize="11"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <WrapPanel Margin="0,0,0,10">
+                    <Button Content="&gt; 1 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&gt;1mb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="&gt; 10 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&gt;10mb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="&gt; 100 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&gt;100mb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="&lt; 100 KB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&lt;100kb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="1–10 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="1mb..10mb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                  </WrapPanel>
+
+                  <TextBlock Text="Date modified" FontWeight="SemiBold" FontSize="11"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <WrapPanel Margin="0,0,0,10">
+                    <Button Content="Today" Command="{Binding ApplyDateFilterCommand}" CommandParameter="today"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="This week" Command="{Binding ApplyDateFilterCommand}" CommandParameter="thisweek"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="This month" Command="{Binding ApplyDateFilterCommand}" CommandParameter="thismonth"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="This year" Command="{Binding ApplyDateFilterCommand}" CommandParameter="thisyear"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="Yesterday" Command="{Binding ApplyDateFilterCommand}" CommandParameter="yesterday"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                  </WrapPanel>
+
+                  <TextBlock Text="Type" FontWeight="SemiBold" FontSize="11"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <ItemsControl ItemsSource="{Binding TypeFilterGroups}" Margin="0,0,0,10">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel/>
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Button Content="{Binding DisplayName}"
+                                Command="{Binding DataContext.ApplyTypeFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding Key}"
+                                Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                                Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                                BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"
+                                ToolTip="{Binding Key, StringFormat={}{0}:}"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <TextBlock Text="Saved filters" FontWeight="SemiBold" FontSize="11"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <DockPanel Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right" Content="Save"
+                            Command="{Binding SaveCurrentFilterCommand}"
+                            Padding="10,3" FontSize="11" Margin="6,0,0,0"
+                            Background="{StaticResource AccentBrush}" Foreground="White"
+                            BorderThickness="0" Cursor="Hand"/>
+                    <TextBox Text="{Binding NewFilterName, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="12"
+                             Background="{StaticResource BgBrush}"
+                             Foreground="{StaticResource FgBrush}"
+                             BorderBrush="{StaticResource BorderBrush}"
+                             CaretBrush="{StaticResource FgBrush}"
+                             Padding="4,3"
+                             ToolTip="Name for the current query"/>
+                  </DockPanel>
+                  <ItemsControl ItemsSource="{Binding SavedFilters}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel Margin="0,0,0,4">
+                          <Button DockPanel.Dock="Right" Content="✕"
+                                  Command="{Binding DataContext.DeleteSavedFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}"
+                                  Width="22" Height="20" FontSize="10"
+                                  Background="Transparent" Foreground="#E81123"
+                                  BorderThickness="0" Cursor="Hand" ToolTip="Delete saved filter"/>
+                          <Button Content="{Binding Name}"
+                                  Command="{Binding DataContext.ActivateSavedFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}"
+                                  HorizontalContentAlignment="Left"
+                                  Padding="8,3" FontSize="11"
+                                  Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                                  BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"
+                                  ToolTip="{Binding Query}"/>
+                        </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </ScrollViewer>
+            </Border>
+          </Popup>
+        </Grid>
+
         <!-- Right-justified match mode (mutual exclusive; both off = literal spaces) -->
-        <CheckBox Grid.Column="5"
+        <CheckBox Grid.Column="6"
                   Content="And"
                   IsChecked="{Binding IsAndChecked}"
                   VerticalAlignment="Center"
                   Margin="0,0,10,0"
                   Foreground="{StaticResource FgBrush}"
                   ToolTip="All terms must match (default)"/>
-        <CheckBox Grid.Column="6"
+        <CheckBox Grid.Column="7"
                   Content="Or"
                   IsChecked="{Binding IsOrChecked}"
                   VerticalAlignment="Center"
@@ -186,7 +365,7 @@
                   ToolTip="Any term may match. Both And and Or off = literal spaces in the name."/>
 
         <!-- Circular busy ring: rotates while IsSearching (user search only) -->
-        <Viewbox Grid.Column="7"
+        <Viewbox Grid.Column="8"
                  Width="20" Height="20"
                  Margin="8,0,0,0"
                  VerticalAlignment="Center"
@@ -232,7 +411,7 @@
     </Border>
 
     <TextBlock DockPanel.Dock="Top"
-               Text="Filters: substrings, * ? wildcards, ext:pdf, .* regex, C:\path\ scope  ·  And/Or/literal  ·  drag results out  ·  Enter open  ·  Ctrl+Enter folder"
+               Text="Filters: substrings, * ? wildcards, !NOT, ext:/doc:/img:, size:, dm:, .* regex, C:\path\ scope  ·  Filter popup  ·  And/Or/literal  ·  drag out  ·  Enter open"
                Foreground="{StaticResource MutedBrush}"
                FontSize="11"
                Margin="0,0,0,8"
@@ -327,9 +506,13 @@
       </DataGrid.Resources>
       <DataGrid.Columns>
         <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+        <DataGridTextColumn x:Name="ExtensionColumn" Header="Extension" Binding="{Binding Extension}" Width="80"
+                           Visibility="Collapsed"/>
         <DataGridTextColumn Header="Path" Binding="{Binding Directory}" Width="3*"/>
         <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="90"/>
         <DataGridTextColumn Header="Date Modified" Binding="{Binding ModifiedDisplay}" Width="140"/>
+        <DataGridTextColumn x:Name="AttributesColumn" Header="Attributes" Binding="{Binding AttributesDisplay}" Width="90"
+                           Visibility="Collapsed"/>
       </DataGrid.Columns>
       <DataGrid.ContextMenu>
         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
@@ -356,6 +539,13 @@
           <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
           <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
           <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>
+          <Separator/>
+          <MenuItem Header="Show Extension column"
+                    IsCheckable="True"
+                    IsChecked="{Binding ShowExtensionColumn, Mode=TwoWay}"/>
+          <MenuItem Header="Show Attributes column"
+                    IsCheckable="True"
+                    IsChecked="{Binding ShowAttributesColumn, Mode=TwoWay}"/>
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.InputBindings>

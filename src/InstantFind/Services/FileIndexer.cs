@@ -363,6 +363,12 @@ public sealed class FileIndexer
 
             var ext = isDirectory ? "" : Path.GetExtension(name).TrimStart('.').ToLowerInvariant();
             var directory = Path.GetDirectoryName(fullPath) ?? fullPath;
+            string attrsText = string.Empty;
+            try
+            {
+                attrsText = QueryParser.FormatAttributes(File.GetAttributes(fullPath));
+            }
+            catch { }
 
             return new FileEntry
             {
@@ -372,7 +378,8 @@ public sealed class FileIndexer
                 Extension = ext,
                 Size = size,
                 ModifiedUtc = modified,
-                IsDirectory = isDirectory
+                IsDirectory = isDirectory,
+                AttributesText = attrsText
             };
         }
         catch
