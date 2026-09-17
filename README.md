@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.9) | https://github.com/primalBeast/instant-find/releases/download/v1.0.9/InstantFind-win-x64.zip |
+| Direct zip (v1.0.10) | https://github.com/primalBeast/instant-find/releases/download/v1.0.10/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -40,8 +40,9 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.9)
+## Features (v1.0.10)
 
+- **Literal `_` / `-` in search (v1.0.10)**: FTS5 `unicode61` treats `_` and `-` (and other non-alphanumeric characters) as token separators, so a plain FTS query like `72_` previously matched names such as `6728`. Terms containing those characters now **leave FTS** and use SQL `LIKE` with `ESCAPE '\'` (same as wildcards), so `72_` requires a literal underscore and `a-b` requires a literal hyphen.
 - **Atomic rebuild + delete prune (v1.0.9)**: Rebuild writes to a temporary `index-rebuild.db` beside the live index and **atomically swaps** only on success. Cancel or crash mid-rebuild **keeps the previous live index** (leftover rebuild files are discarded on next launch). Progress shows **Preparing rebuild…** / **Scanning… N items — path** immediately (no stuck “Starting index…”). Cancel is cooperative; UI shows **Indexing cancelled — previous index kept.** and **restarts watchers**. Deleted/renamed folders remove rows by `path` and by `directory` (exact + under). Watcher buffer overflows schedule a **background prune** of missing paths; search refresh also drops hits that no longer exist on disk.
 - **Search perf + regex fixes (v1.0.8)**: path scope no longer forces a slow LIKE path — FTS stays on with a SQL path prefix filter. Only Match Case / Whole Word / wildcards / Regex leave FTS. Plain FTS skips redundant per-row Matches. `INDEX` on `files(path)`. Regex: shell-glob fallback so `*.pdf` with Regex on finds files; longest alphanumeric literal used as a SQL `LIKE` prefilter; invalid patterns (e.g. `(?`) show status **Invalid regex** (no crash). Scope rule: only when the path prefix **ends with `\`** — `C:\Projects` is a normal FTS term; `C:\Projects\` / `C:\Projects\foo` / `C:\` scope as expected.
 - **Regex toggle (`.*`) (v1.0.7+)**: compact button to the right of **W**. Query body is a **.NET regex** against the **filename** (path too if the pattern has `\`/`/`). If compile fails and the pattern looks like a shell glob (`*`/`?` without `(`, `[`, or `{`), converts glob→regex. Case follows **Aa**. Leaves FTS; capped by `maxResults`. Persisted (`useRegex`, default off).
@@ -57,7 +58,7 @@ Settings and the index database live under:
 - **And / Or** checkboxes (right side of the search bar, before the spinner): default And; both off = literal whitespace (spaces must appear in the name)
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, `.*` Regex, then the query box
-- Match Case, Whole Word, wildcards, or Regex leave FTS and use SQL `LIKE` / in-memory filter (still capped by `maxResults`). Path scope alone keeps FTS + SQL path prefix (v1.0.8)
+- Match Case, Whole Word, wildcards, Regex, or terms with FTS separators (`_` / `-` / other non-alphanumeric) leave FTS and use SQL `LIKE` / in-memory filter (still capped by `maxResults`). Path scope alone keeps FTS + SQL path prefix when terms are FTS-safe (v1.0.8 / v1.0.10)
 - Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index, not live disk)
 - Context menu: Open, Open Containing Folder, **Open with…** (favorites + choose .exe), **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
@@ -99,8 +100,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.9 && git push origin v1.0.9`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.9`
+1. **Tag** — push a version tag: `git tag v1.0.10 && git push origin v1.0.10`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.10`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

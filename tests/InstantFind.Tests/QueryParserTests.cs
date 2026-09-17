@@ -144,14 +144,11 @@ public class QueryParserTests
     }
 
     [Fact]
-    public void BuildFtsMatch_LiteralWhitespace_single_token()
+    public void BuildFtsMatch_LiteralWhitespace_leaves_fts_for_spaces()
     {
+        // Space is an FTS unicode61 separator — use LIKE for literal contiguous match
         var q = QueryParser.Parse("hello world", MatchMode.LiteralWhitespace);
-        var fts = QueryParser.BuildFtsMatch(q);
-        Assert.NotNull(fts);
-        Assert.DoesNotContain(" AND ", fts);
-        Assert.DoesNotContain(" OR ", fts);
-        Assert.Contains("hello world", fts, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Null(QueryParser.BuildFtsMatch(q));
     }
 
     [Fact]
@@ -292,6 +289,71 @@ public class QueryParserTests
     {
         var q = QueryParser.Parse("report", MatchMode.And, useRegex: true);
         Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
+
+
+    // ----- v1.0.10: FTS unicode61 separators (_, -) leave FTS / LIKE literal -----
+
+    [Fact]
+    public void BuildFtsMatch_returns_null_for_underscore_term()
+    {
+        var q = QueryParser.Parse("72_");
+        Assert.Contains("72_", q.Terms);
+        Assert.True(QueryParser.TermHasFtsTokenSeparators("72_"));
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_returns_null_for_hyphen_term()
+    {
+        var q = QueryParser.Parse("a-b");
+        Assert.Contains("a-b", q.Terms);
+        Assert.True(QueryParser.TermHasFtsTokenSeparators("a-b"));
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_allows_alphanumeric_terms()
+    {
+        var q = QueryParser.Parse("report42");
+        Assert.False(QueryParser.TermHasFtsTokenSeparators("report42"));
+        Assert.NotNull(QueryParser.BuildFtsMatch(q));
+    }
+
+    [Fact]
+    public void Underscore_term_does_not_match_digits_alone()
+    {
+        // Bug: FTS "72_"* tokenized as "72" matched "6728". LIKE + Matches require literal '_'.
+        var q = QueryParser.Parse("72_");
+        Assert.False(QueryParser.Matches(q, "6728", @"C:\data\6728", ""));
+        Assert.False(QueryParser.Matches(q, "6728.txt", @"C:\data\6728.txt", "txt"));
+    }
+
+    [Fact]
+    public void Underscore_term_matches_literal_underscore_in_name()
+    {
+        var q = QueryParser.Parse("72_");
+        Assert.True(QueryParser.Matches(q, "file72_name.txt", @"C:\data\file72_name.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "72_", @"C:\data\72_", ""));
+        Assert.True(QueryParser.Matches(q, "x72_y", @"C:\data\x72_y", ""));
+    }
+
+    [Fact]
+    public void Hyphen_term_is_literal_not_token_break()
+    {
+        var q = QueryParser.Parse("a-b");
+        Assert.True(QueryParser.Matches(q, "a-b.txt", @"C:\docs\a-b.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "ab.txt", @"C:\docs\ab.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "a_b.txt", @"C:\docs\a_b.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "unrelated.txt", @"C:\docs\unrelated.txt", "txt"));
+    }
+
+    [Fact]
+    public void PlainTermToLike_escapes_underscore_for_sql()
+    {
+        // LIKE path must use ESCAPE '\' with escaped '_' so 72_ ≠ 6728
+        Assert.Equal(@"%72\_%", QueryParser.PlainTermToLike("72_"));
+        Assert.Equal("%a-b%", QueryParser.PlainTermToLike("a-b"));
     }
 
     // ----- #8 Path scope -----

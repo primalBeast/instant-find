@@ -371,6 +371,9 @@ public sealed class IndexDatabase : IDisposable
 
         var results = new List<FileEntry>();
         var fts = QueryParser.BuildFtsMatch(query);
+        // Terms with FTS unicode61 separators (_, -, etc.) → LIKE so literals are required.
+        if (fts is null && query.Terms.Count > 0)
+            return SearchWithLike(query, maxResults, includeDirectories, options);
 
         using var cmd = Conn().CreateCommand();
         var sql = new System.Text.StringBuilder();

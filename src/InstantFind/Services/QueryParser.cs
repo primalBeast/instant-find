@@ -516,8 +516,25 @@ public static class QueryParser
     }
 
     /// <summary>
+    /// True when a plain term contains characters that FTS5 unicode61 treats as token
+    /// separators (e.g. '_' / '-'). Those queries must use LIKE so literals are preserved.
+    /// Letters and digits are FTS-safe; '*'/'?' already leave via <see cref="ParsedQuery.HasWildcards"/>.
+    /// </summary>
+    public static bool TermHasFtsTokenSeparators(string term)
+    {
+        foreach (var c in term)
+        {
+            if (char.IsLetterOrDigit(c))
+                continue;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Builds an FTS5 MATCH expression for plain (non-wildcard) substring terms only.
-    /// Returns null when the query has wildcards, regex, or no usable terms — callers should use LIKE instead.
+    /// Returns null when the query has wildcards, regex, FTS-splitting punctuation
+    /// (e.g. '_' / '-'), or no usable terms — callers should use LIKE instead.
     /// Match Case / Whole Word / Regex must leave FTS (caller responsibility).
     /// </summary>
     public static string? BuildFtsMatch(ParsedQuery query)
@@ -533,6 +550,10 @@ public static class QueryParser
         {
             if (term.Length == 0)
                 continue;
+
+            // unicode61 splits on '_' / '-' / other punctuation → token too loose (e.g. "72_" → "72")
+            if (TermHasFtsTokenSeparators(term))
+                return null;
 
             parts.Add(EscapeFtsToken(term) + "*");
         }
