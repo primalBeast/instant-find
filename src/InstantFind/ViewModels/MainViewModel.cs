@@ -463,9 +463,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         StatusText = "Searching…";
 
         IReadOnlyList<FileEntry> hits;
+        bool invalidRegex = false;
         try
         {
-            hits = await Task.Run(() => _search.Search(querySnapshot, options)).ConfigureAwait(false);
+            hits = await Task.Run(() =>
+            {
+                var r = _search.Search(querySnapshot, options, out var inv);
+                invalidRegex = inv;
+                return r;
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -478,7 +484,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation));
+        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation, invalidRegex));
     }
 
     /// <summary>
@@ -494,9 +500,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var generation = Interlocked.Increment(ref _searchGeneration);
 
         IReadOnlyList<FileEntry> hits;
+        bool invalidRegex = false;
         try
         {
-            hits = await Task.Run(() => _search.Search(querySnapshot, options)).ConfigureAwait(false);
+            hits = await Task.Run(() =>
+            {
+                var r = _search.Search(querySnapshot, options, out var inv);
+                invalidRegex = inv;
+                return r;
+            }).ConfigureAwait(false);
         }
         catch
         {
@@ -504,10 +516,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation));
+        await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation, invalidRegex));
     }
 
-    private void ApplySearchResults(IReadOnlyList<FileEntry> hits, int generation)
+    private void ApplySearchResults(IReadOnlyList<FileEntry> hits, int generation, bool invalidRegex = false)
     {
         // Ignore stale results if a newer search/refresh superseded this one
         if (generation != _searchGeneration) return;
@@ -521,7 +533,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 UpdateResultsMetadataInPlace(hits);
 
             IsSearching = false;
-            UpdateResultsStatus();
+            UpdateResultsStatus(invalidRegex);
             return;
         }
 
@@ -550,14 +562,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         // User path turned the spinner on; silent path never did. Always clear here.
         IsSearching = false;
-        UpdateResultsStatus();
+        UpdateResultsStatus(invalidRegex);
     }
 
-    private void UpdateResultsStatus()
+    private void UpdateResultsStatus(bool invalidRegex = false)
     {
         if (string.IsNullOrWhiteSpace(Query))
         {
             StatusText = $"Ready — {_db.Count():N0} items indexed";
+        }
+        else if (invalidRegex)
+        {
+            StatusText = "Invalid regex";
         }
         else if (Results.Count >= _settings.MaxResults)
         {

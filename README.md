@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.7) | https://github.com/primalBeast/instant-find/releases/download/v1.0.7/InstantFind-win-x64.zip |
+| Direct zip (v1.0.8) | https://github.com/primalBeast/instant-find/releases/download/v1.0.8/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -39,10 +39,11 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.7)
+## Features (v1.0.8)
 
-- **Regex toggle (`.*`) (v1.0.7)**: compact button to the right of **W** in the search bar. When on, the query body (after any path-scope prefix) is a **.NET regex** matched against the **filename** first; if the pattern contains `\` or `/`, the full path is also tried. Case follows **Aa**. Leaves FTS; filtered in memory/SQL and still capped by `maxResults`. Persisted in `settings.json` (`useRegex`, default off).
-- **Path scope (v1.0.7)**: if the query starts with a Windows path ending in `\` (e.g. `C:\Work\`, `C:\Projects\*.pdf`, `C:\Projects\ budget`), that prefix scopes results to that directory (prefix match; case follows **Aa**). Remaining text is the search terms / regex body. Path-only (`C:\Projects\`) lists under that folder (still MaxResults). Drive chips still apply as an additional filter.
+- **Search perf + regex fixes (v1.0.8)**: path scope no longer forces a slow LIKE path — FTS stays on with a SQL path prefix filter. Only Match Case / Whole Word / wildcards / Regex leave FTS. Plain FTS skips redundant per-row Matches. `INDEX` on `files(path)`. Regex: shell-glob fallback so `*.pdf` with Regex on finds files; longest alphanumeric literal used as a SQL `LIKE` prefilter; invalid patterns (e.g. `(?`) show status **Invalid regex** (no crash). Scope rule: only when the path prefix **ends with `\`** — `C:\Projects` is a normal FTS term; `C:\Projects\` / `C:\Projects\foo` / `C:\` scope as expected.
+- **Regex toggle (`.*`) (v1.0.7+)**: compact button to the right of **W**. Query body is a **.NET regex** against the **filename** (path too if the pattern has `\`/`/`). If compile fails and the pattern looks like a shell glob (`*`/`?` without `(`, `[`, or `{`), converts glob→regex. Case follows **Aa**. Leaves FTS; capped by `maxResults`. Persisted (`useRegex`, default off).
+- **Path scope (v1.0.7+)**: leading Windows path **ending in `\`** scopes results (e.g. `C:\Work\`, `C:\Projects\*.pdf`). `C:\Projects` (no trailing `\`) is **not** a scope. Path-only (`C:\Projects\`) lists under that folder. Kept with FTS when possible (v1.0.8). Drive chips still apply.
 - **Open with… (v1.0.7)**: context menu → **Open with…** → **Favorite apps** (recent exe paths, last 8, in `settings.json`) and **Choose another app…** (OpenFileDialog starting in Program Files). Files only; soft-fails if the exe is missing.
 - **Drag results out (v1.0.7)**: drag a result row from the grid to Explorer / other drop targets (OLE `FileDrop` with the real path). Uses the selected row.
 - Instant as-you-type search after the first index completes
@@ -54,7 +55,7 @@ Settings and the index database live under:
 - **And / Or** checkboxes (right side of the search bar, before the spinner): default And; both off = literal whitespace (spaces must appear in the name)
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, `.*` Regex, then the query box
-- Match Case, Whole Word, Regex, or path-scope leaves FTS and uses SQL `LIKE` / in-memory filter (still capped by `maxResults`)
+- Match Case, Whole Word, wildcards, or Regex leave FTS and use SQL `LIKE` / in-memory filter (still capped by `maxResults`). Path scope alone keeps FTS + SQL path prefix (v1.0.8)
 - Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index, not live disk)
 - Context menu: Open, Open Containing Folder, **Open with…** (favorites + choose .exe), **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
@@ -96,8 +97,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.7 && git push origin v1.0.7`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.7`
+1. **Tag** — push a version tag: `git tag v1.0.8 && git push origin v1.0.8`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.8`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

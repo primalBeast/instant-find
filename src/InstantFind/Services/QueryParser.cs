@@ -110,7 +110,11 @@ public static class QueryParser
     }
 
     /// <summary>
-    /// Extracts a directory scope when the query starts with a Windows path ending in '\'.
+    /// Extracts a directory scope when the query starts with a Windows path whose
+    /// scoped prefix ends with '\'. Bradley rule: only scope when that prefix ends with '\'.
+    /// <c>C:\Projects</c> → no scope (normal FTS term);
+    /// <c>C:\Projects\</c> → scope; <c>C:\Projects\foo</c> → scope <c>C:\Projects\</c>, rest <c>foo</c>;
+    /// <c>C:\</c> alone → scope OK; <c>C:\*.pdf</c> → scope <c>C:\</c>.
     /// </summary>
     public static bool TryExtractPathScope(string input, out string scope, out string remainder)
     {
@@ -129,6 +133,26 @@ public static class QueryParser
             return false;
 
         remainder = m.Groups["rest"].Value;
+
+        // Reject false positive: "C:\Projects" → scope=C:\ + rest=Projects.
+        // Drive-root scope with a bare path segment (no \, wildcards, or leading space)
+        // means the user typed a path-like FTS term, not a directory scope.
+        if (scope.Length == 3 && remainder.Length > 0)
+        {
+            bool intentional =
+                remainder.Contains('\\')
+                || remainder.Contains('/')
+                || remainder.Contains('*')
+                || remainder.Contains('?')
+                || remainder[0] is ' ' or '\t';
+            if (!intentional)
+            {
+                scope = string.Empty;
+                remainder = input;
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -222,20 +246,10 @@ public static class QueryParser
         if (string.IsNullOrEmpty(query.RegexPattern))
             return !string.IsNullOrEmpty(query.PathScope);
 
-        Regex rx;
-        try
-        {
-            var options = RegexOptions.CultureInvariant;
-            if (!matchCase)
-                options |= RegexOptions.IgnoreCase;
-            rx = new Regex(query.RegexPattern, options);
-        }
-        catch (ArgumentException)
-        {
-            return false; // invalid pattern → no match
-        }
+        if (!TryCompileRegex(query.RegexPattern, matchCase, out var rx) || rx is null)
+            return false;
 
-        // Prefer filename first (same spirit as shell wildcards)
+        // Prefer filename first (unanchored IsMatch; ^/$ in the pattern still anchors)
         if (rx.IsMatch(name))
             return true;
         if (rx.IsMatch(System.IO.Path.GetFileName(fullPath)))
@@ -246,6 +260,115 @@ public static class QueryParser
             return rx.IsMatch(fullPath);
 
         return false;
+    }
+
+    /// <summary>
+    /// Compiles a .NET regex, or if that fails, converts shell-glob (* ?) to regex and retries.
+    /// Returns false when neither form is valid. Empty pattern → true with <c>regex == null</c>.
+    /// </summary>
+    public static bool TryCompileRegex(string pattern, bool matchCase, out Regex? regex)
+    {
+        regex = null;
+        if (string.IsNullOrEmpty(pattern))
+            return true;
+
+        var options = RegexOptions.CultureInvariant;
+        if (!matchCase)
+            options |= RegexOptions.IgnoreCase;
+
+        try
+        {
+            regex = new Regex(pattern, options);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            // fall through to shell-glob conversion when appropriate
+        }
+
+        // Only treat as shell-glob when * or ? appear and the pattern does not look like
+        // intentional (broken) regex grouping — so "(?" stays Invalid regex, while "*.pdf" works.
+        bool looksLikeGlob =
+            (pattern.Contains('*') || pattern.Contains('?'))
+            && pattern.IndexOfAny(new[] { '(', '[', '{' }) < 0;
+        if (!looksLikeGlob)
+        {
+            regex = null;
+            return false;
+        }
+
+        try
+        {
+            regex = new Regex(ShellGlobToRegex(pattern), options);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            regex = null;
+            return false;
+        }
+    }
+
+    /// <summary>True when the pattern compiles as regex or as shell-glob→regex.</summary>
+    public static bool IsRegexPatternValid(string? pattern, bool matchCase = false)
+    {
+        if (string.IsNullOrEmpty(pattern))
+            return true;
+        return TryCompileRegex(pattern, matchCase, out _);
+    }
+
+    /// <summary>
+    /// Shell-glob → regex: * → .*, ? → ., escape other regex metacharacters.
+    /// Intended for unanchored <see cref="Regex.IsMatch(string)"/> against the filename.
+    /// </summary>
+    public static string ShellGlobToRegex(string glob)
+    {
+        var sb = new StringBuilder(glob.Length * 2);
+        foreach (var c in glob)
+        {
+            switch (c)
+            {
+                case '*':
+                    sb.Append(".*");
+                    break;
+                case '?':
+                    sb.Append('.');
+                    break;
+                default:
+                    sb.Append(Regex.Escape(c.ToString()));
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Longest contiguous alphanumeric run in a regex/glob pattern for SQL LIKE prefilter.
+    /// Returns null when no alphanumeric run exists.
+    /// </summary>
+    public static string? TryExtractLongestLiteral(string? pattern)
+    {
+        if (string.IsNullOrEmpty(pattern))
+            return null;
+
+        string? best = null;
+        var startIdx = -1;
+        for (int i = 0; i <= pattern.Length; i++)
+        {
+            bool alnum = i < pattern.Length && char.IsLetterOrDigit(pattern[i]);
+            if (alnum)
+            {
+                if (startIdx < 0) startIdx = i;
+            }
+            else if (startIdx >= 0)
+            {
+                var len = i - startIdx;
+                if (best is null || len > best.Length)
+                    best = pattern.Substring(startIdx, len);
+                startIdx = -1;
+            }
+        }
+        return best;
     }
 
     public static bool TermMatches(string term, string name, string fullPath)

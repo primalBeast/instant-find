@@ -47,6 +47,7 @@ public sealed class IndexDatabase : IDisposable
 
             CREATE INDEX IF NOT EXISTS idx_files_extension ON files(extension);
             CREATE INDEX IF NOT EXISTS idx_files_directory ON files(directory);
+            CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
                 name,
@@ -166,9 +167,9 @@ public sealed class IndexDatabase : IDisposable
         if (options.EnabledDrivePrefixes.Count == 0)
             return Array.Empty<FileEntry>();
 
-        // Match Case / Whole Word / wildcards / regex / path-scope listing → leave FTS
-        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards
-                        || query.UseRegex || !string.IsNullOrEmpty(query.PathScope);
+        // Match Case / Whole Word / wildcards / regex → leave FTS.
+        // PathScope alone does NOT leave FTS — keep FTS + SQL path prefix filter.
+        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards || query.UseRegex;
         if (leaveFts)
             return SearchWithLike(query, maxResults, includeDirectories, options);
 
@@ -222,15 +223,11 @@ public sealed class IndexDatabase : IDisposable
         try
         {
             using var reader = cmd.ExecuteReader();
+            // Plain FTS: skip redundant per-row Matches (no case/wholeword/wildcards/regex).
+            // PathScope / extensions are already applied in SQL.
             while (reader.Read())
             {
                 var entry = ReadEntry(reader);
-                if (query.Terms.Count > 0 || query.UseRegex || !string.IsNullOrEmpty(query.PathScope))
-                {
-                    if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
-                        continue;
-                }
-
                 results.Add(entry);
                 if (results.Count >= maxResults)
                     break;
@@ -266,10 +263,22 @@ public sealed class IndexDatabase : IDisposable
         var where = new List<string>();
         var termClauses = new List<string>();
 
-        // Regex: no SQL term prefilter — stream under drive/path scope and filter in memory
+        // Regex: optional literal alphanumeric LIKE prefilter on name; refine in memory
         bool regexMode = query.UseRegex;
         bool regexPathOnly = regexMode && string.IsNullOrEmpty(query.RegexPattern)
                              && !string.IsNullOrEmpty(query.PathScope);
+        string? regexLiteral = regexMode && !regexPathOnly
+            ? QueryParser.TryExtractLongestLiteral(query.RegexPattern)
+            : null;
+
+        if (regexMode && regexLiteral is not null)
+        {
+            // Prefilter: name LIKE %literal% (never unbounded full-table when a literal exists)
+            string nameExpr = options.MatchCase ? "name" : "LOWER(name)";
+            string likeExpr = options.MatchCase ? "$regexLit" : "LOWER($regexLit)";
+            termClauses.Add($"{nameExpr} LIKE {likeExpr} ESCAPE '\\'");
+            cmd.Parameters.AddWithValue("$regexLit", QueryParser.PlainTermToLike(regexLiteral));
+        }
 
         if (!regexMode)
         {
@@ -352,14 +361,16 @@ public sealed class IndexDatabase : IDisposable
 
         sql.Append(" WHERE ").Append(string.Join(" AND ", where));
 
-        // Regex (non path-only): do not LIMIT in SQL — filter in memory up to maxResults.
-        // Path-only / normal LIKE: LIMIT in SQL then refine.
-        bool streamForRegex = regexMode && !regexPathOnly;
-        if (!streamForRegex)
+        // Always stop at maxResults in the read loop.
+        // With a regex literal prefilter: LIMIT in SQL (cushion for in-memory rejects).
+        // Without a literal: no SQL LIMIT (may scan), but still break at maxResults —
+        // never an unbounded "collect everything" intent when a literal exists.
+        if (!(regexMode && !regexPathOnly && regexLiteral is null))
         {
+            int sqlLimit = regexMode && !regexPathOnly ? maxResults * 4 : maxResults;
+            if (sqlLimit < maxResults) sqlLimit = maxResults;
             sql.Append(" LIMIT $limit;");
-            // Fetch a cushion when WholeWord/MatchCase may reject rows after LIKE
-            cmd.Parameters.AddWithValue("$limit", maxResults);
+            cmd.Parameters.AddWithValue("$limit", sqlLimit);
         }
         else
         {

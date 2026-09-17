@@ -246,6 +246,45 @@ public class QueryParserTests
     {
         var q = QueryParser.Parse("[unterminated", MatchMode.And, useRegex: true);
         Assert.False(QueryParser.Matches(q, "file.txt", @"C:\file.txt", "txt"));
+        Assert.False(QueryParser.IsRegexPatternValid("[unterminated"));
+    }
+
+    [Fact]
+    public void Regex_glob_star_pdf_finds_filename()
+    {
+        // Users type *.pdf with Regex on — invalid as .NET regex, valid as shell-glob fallback
+        var q = QueryParser.Parse("*.pdf", MatchMode.And, useRegex: true);
+        Assert.True(q.UseRegex);
+        Assert.True(QueryParser.IsRegexPatternValid("*.pdf"));
+        Assert.True(QueryParser.Matches(q, "a.pdf", @"C:\docs\a.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "a.docx", @"C:\docs\a.docx", "docx"));
+    }
+
+    [Fact]
+    public void Regex_plain_report_finds_filename()
+    {
+        var q = QueryParser.Parse("report", MatchMode.And, useRegex: true);
+        Assert.True(QueryParser.Matches(q, "report.txt", @"C:\docs\report.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "budget.txt", @"C:\docs\budget.txt", "txt"));
+    }
+
+    [Fact]
+    public void Regex_incomplete_group_is_invalid_no_crash()
+    {
+        var q = QueryParser.Parse("(?", MatchMode.And, useRegex: true);
+        Assert.False(QueryParser.IsRegexPatternValid("(?"));
+        Assert.False(QueryParser.Matches(q, "file.txt", @"C:\file.txt", "txt"));
+        Assert.True(QueryParser.TryCompileRegex("(?", matchCase: false, out var rx) == false);
+        Assert.Null(rx);
+    }
+
+    [Fact]
+    public void Regex_anchored_IMG_digits()
+    {
+        var q = QueryParser.Parse(@"^IMG_\d+", MatchMode.And, useRegex: true);
+        Assert.True(QueryParser.Matches(q, "IMG_001.jpg", @"C:\photos\IMG_001.jpg", "jpg"));
+        Assert.False(QueryParser.Matches(q, "photo_IMG_001.jpg", @"C:\photos\photo_IMG_001.jpg", "jpg"));
+        Assert.Equal("IMG", QueryParser.TryExtractLongestLiteral(@"^IMG_\d+"));
     }
 
     [Fact]
@@ -276,6 +315,27 @@ public class QueryParserTests
         Assert.False(QueryParser.TryExtractPathScope("report.pdf", out _, out _));
         var q = QueryParser.Parse("report.pdf");
         Assert.Null(q.PathScope);
+    }
+
+
+    [Fact]
+    public void PathScope_absent_for_path_without_trailing_slash()
+    {
+        // Bradley: C:\Projects is a normal FTS term — do NOT scope to C:\
+        Assert.False(QueryParser.TryExtractPathScope(@"C:\Projects", out var scope, out var rest));
+        var q = QueryParser.Parse(@"C:\Projects");
+        Assert.Null(q.PathScope);
+        Assert.Contains(@"C:\Projects", q.Terms);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Projects\foo", @"C:\Projects\", "foo")]
+    [InlineData(@"C:\*.pdf", @"C:\", "*.pdf")]
+    public void PathScope_bradley_trailing_slash_rules(string input, string expectedScope, string expectedRest)
+    {
+        Assert.True(QueryParser.TryExtractPathScope(input, out var scope, out var rest));
+        Assert.Equal(expectedScope, scope);
+        Assert.Equal(expectedRest, rest.TrimStart());
     }
 
     [Fact]
