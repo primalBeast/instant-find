@@ -254,14 +254,18 @@ public sealed class IndexDatabase : IDisposable
         {
             var term = query.Terms[i];
             var pname = $"$like{i}";
-            string pattern;
-            if (term.Contains('*') || term.Contains('?'))
-                pattern = QueryParser.ShellWildcardToLike(term);
-            else
-                pattern = QueryParser.PlainTermToLike(term);
+            bool isWildcard = term.Contains('*') || term.Contains('?');
+            string pattern = isWildcard
+                ? QueryParser.ShellWildcardToLike(term)
+                : QueryParser.PlainTermToLike(term);
 
-            // Match filename OR full path (case-insensitive for ASCII)
-            where.Add($"(LOWER(name) LIKE LOWER({pname}) ESCAPE '\\' OR LOWER(path) LIKE LOWER({pname}) ESCAPE '\\')");
+            // Filename wildcards match name only so D*.pdf cannot hit via a folder like \docs\
+            // Plain terms and path-shaped wildcards may also match path.
+            bool pathWildcard = isWildcard && (term.Contains('\\') || term.Contains('/'));
+            if (isWildcard && !pathWildcard)
+                where.Add($"LOWER(name) LIKE LOWER({pname}) ESCAPE '\\'");
+            else
+                where.Add($"(LOWER(name) LIKE LOWER({pname}) ESCAPE '\\' OR LOWER(path) LIKE LOWER({pname}) ESCAPE '\\')");
             cmd.Parameters.AddWithValue(pname, pattern);
         }
 

@@ -81,16 +81,20 @@ public static class QueryParser
             var pattern = "^" + Regex.Escape(term)
                 .Replace("\\*", ".*")
                 .Replace("\\?", ".") + "$";
+            // Shell wildcards apply to the filename — do not let D*.pdf match via a folder like \\docs\\
             if (Regex.IsMatch(name, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                 return true;
-            // Also allow path segment wildcard match against full path filename-style
             if (Regex.IsMatch(System.IO.Path.GetFileName(fullPath), pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                 return true;
-            // Path substring with wildcards against full path
-            var pathPattern = Regex.Escape(term)
-                .Replace("\\*", ".*")
-                .Replace("\\?", ".");
-            return Regex.IsMatch(fullPath, pathPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            // Path patterns only when the term itself contains a path separator
+            if (term.Contains('\\') || term.Contains('/'))
+            {
+                var pathPattern = Regex.Escape(term)
+                    .Replace("\\*", ".*")
+                    .Replace("\\?", ".");
+                return Regex.IsMatch(fullPath, pathPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            }
+            return false;
         }
 
         return fullPath.Contains(term, StringComparison.OrdinalIgnoreCase)
