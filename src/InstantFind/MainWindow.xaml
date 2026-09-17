@@ -16,21 +16,60 @@
                  VerticalAlignment="Center"
                  DockPanel.Dock="Left"
                  Margin="0,0,16,0"/>
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Content="Rebuild Index"
-                Command="{Binding RebuildIndexCommand}"
-                Padding="12,6" Margin="0,0,8,0"
-                Background="{StaticResource AccentBrush}"
-                Foreground="White" BorderThickness="0"
-                Cursor="Hand"/>
-        <Button Content="Cancel"
-                Command="{Binding CancelIndexCommand}"
-                Padding="12,6"
-                Background="{StaticResource PanelBrush}"
-                Foreground="{StaticResource FgBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
-                Cursor="Hand"/>
-      </StackPanel>
+      <Button Content="{Binding IndexButtonText}"
+              Command="{Binding IndexButtonCommand}"
+              Padding="12,6"
+              MinWidth="128"
+              HorizontalAlignment="Right"
+              Cursor="Hand"
+              FontWeight="SemiBold"
+              BorderThickness="1"
+              SnapsToDevicePixels="True">
+        <Button.Style>
+          <Style TargetType="Button">
+            <!-- Idle: solid accent (never blank system chrome) -->
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Template">
+              <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                  <Border x:Name="Bd"
+                          Background="{TemplateBinding Background}"
+                          BorderBrush="{TemplateBinding BorderBrush}"
+                          BorderThickness="{TemplateBinding BorderThickness}"
+                          CornerRadius="3"
+                          Padding="{TemplateBinding Padding}"
+                          SnapsToDevicePixels="True">
+                    <ContentPresenter HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      RecognizesAccessKey="True"/>
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                      <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                      <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                      <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+              <!-- Indexing: danger / accent-outline Cancel -->
+              <DataTrigger Binding="{Binding IsIndexing}" Value="True">
+                <Setter Property="Background" Value="#2D1E1E"/>
+                <Setter Property="Foreground" Value="#F14C4C"/>
+                <Setter Property="BorderBrush" Value="#F14C4C"/>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Button.Style>
+      </Button>
     </DockPanel>
 
     <!-- Search bar: ✕ / Aa / W / box / And / Or / spinner -->

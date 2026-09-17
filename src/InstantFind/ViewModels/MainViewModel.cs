@@ -73,8 +73,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OpenInGitBashCommand = new RelayCommand(
             _ => OpenInGitBash(),
             _ => ActionTarget is not null);
-        RebuildIndexCommand = new RelayCommand(async _ => await RebuildIndexAsync(), _ => !IsIndexing);
-        CancelIndexCommand = new RelayCommand(_ => _indexer.Cancel(), _ => IsIndexing);
+        IndexButtonCommand = new RelayCommand(_ => OnIndexButton());
         ClearQueryCommand = new RelayCommand(_ => ClearQuery());
 
         var count = _db.Count();
@@ -140,10 +139,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _isIndexing, value))
             {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexButtonText)));
                 CommandManager.InvalidateRequerySuggested();
             }
         }
     }
+
+    /// <summary>Header button label: Rebuild Index when idle, Cancel while indexing.</summary>
+    public string IndexButtonText => IsIndexing ? "Cancel" : "Rebuild Index";
 
     public bool IsSearching
     {
@@ -277,8 +280,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand EditWithNotepadPpCommand { get; }
     public ICommand OpenInCmdCommand { get; }
     public ICommand OpenInGitBashCommand { get; }
-    public ICommand RebuildIndexCommand { get; }
-    public ICommand CancelIndexCommand { get; }
+    public ICommand IndexButtonCommand { get; }
     public ICommand ClearQueryCommand { get; }
 
     public string IndexedRootsDisplay =>
@@ -536,6 +538,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return false;
         }
         return true;
+    }
+
+    private void OnIndexButton()
+    {
+        if (IsIndexing)
+        {
+            _indexer.Cancel();
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            "Rebuild the entire index? This can take a while.",
+            "Instant Find",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
+        _ = RebuildIndexAsync();
     }
 
     public async Task RebuildIndexAsync()

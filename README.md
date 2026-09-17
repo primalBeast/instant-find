@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.5) | https://github.com/primalBeast/instant-find/releases/download/v1.0.5/InstantFind-win-x64.zip |
+| Direct zip (v1.0.6) | https://github.com/primalBeast/instant-find/releases/download/v1.0.6/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -39,7 +39,7 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.5)
+## Features (v1.0.6)
 
 - Instant as-you-type search after the first index completes
 - **Live results refresh**: when the index updates (create/change/delete/rename via FileSystemWatcher), an active query re-runs automatically (debounced ~350ms) so new files appear within ~1 second — **silently** (no spinner / no “Searching…” flicker; status updates to the final count only)
@@ -60,7 +60,8 @@ Settings and the index database live under:
   - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
 - Parallel multi-root indexing with progress status
 - Skips inaccessible directories instead of failing
-- Rebuild Index / Cancel from the toolbar
+- **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
+- Rebuild Index from the toolbar (with confirm)
 
 ## Build from source
 
@@ -88,8 +89,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.5 && git push origin v1.0.5`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.5`
+1. **Tag** — push a version tag: `git tag v1.0.6 && git push origin v1.0.6`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.6`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 
