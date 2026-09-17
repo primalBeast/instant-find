@@ -64,6 +64,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         EditWithNotepadPpCommand = new RelayCommand(
             _ => EditWithNotepadPp(),
             _ => SelectedItem is not null && !SelectedItem.IsDirectory);
+        OpenInCmdCommand = new RelayCommand(
+            _ => OpenInCommandPrompt(),
+            _ => SelectedItem is not null);
+        OpenInGitBashCommand = new RelayCommand(
+            _ => OpenInGitBash(),
+            _ => SelectedItem is not null);
         RebuildIndexCommand = new RelayCommand(async _ => await RebuildIndexAsync(), _ => !IsIndexing);
         CancelIndexCommand = new RelayCommand(_ => _indexer.Cancel(), _ => IsIndexing);
         ClearQueryCommand = new RelayCommand(_ => ClearQuery());
@@ -233,6 +239,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand OpenCommand { get; }
     public ICommand OpenFolderCommand { get; }
     public ICommand EditWithNotepadPpCommand { get; }
+    public ICommand OpenInCmdCommand { get; }
+    public ICommand OpenInGitBashCommand { get; }
     public ICommand RebuildIndexCommand { get; }
     public ICommand CancelIndexCommand { get; }
     public ICommand ClearQueryCommand { get; }
@@ -532,6 +540,117 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
+    }
+
+
+    private string? GetSelectedFolderPath()
+    {
+        if (SelectedItem is null) return null;
+        return SelectedItem.IsDirectory
+            ? SelectedItem.FullPath
+            : SelectedItem.Directory;
+    }
+
+    public void OpenInCommandPrompt()
+    {
+        var folder = GetSelectedFolderPath();
+        if (string.IsNullOrWhiteSpace(folder)) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/k cd /d \"{folder}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Could not open Command Prompt: " + ex.Message,
+                "Instant Find",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    public void OpenInGitBash()
+    {
+        var folder = GetSelectedFolderPath();
+        if (string.IsNullOrWhiteSpace(folder)) return;
+
+        var bash = FindGitBash();
+        if (bash is null)
+        {
+            MessageBox.Show(
+                "Git Bash was not found. Install Git for Windows or add bash.exe to PATH.",
+                "Instant Find",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = bash,
+                Arguments = $"--cd=\"{folder}\"",
+                UseShellExecute = false
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Could not start Git Bash: " + ex.Message,
+                "Instant Find",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private static string? FindGitBash()
+    {
+        var candidates = new List<string>();
+
+        var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        if (!string.IsNullOrEmpty(pf))
+            candidates.Add(Path.Combine(pf, "Git", "bin", "bash.exe"));
+        if (!string.IsNullOrEmpty(pf86))
+            candidates.Add(Path.Combine(pf86, "Git", "bin", "bash.exe"));
+        if (!string.IsNullOrEmpty(local))
+            candidates.Add(Path.Combine(local, "Programs", "Git", "bin", "bash.exe"));
+
+        candidates.Add(@"C:\Program Files\Git\bin\bash.exe");
+        candidates.Add(@"C:\Program Files (x86)\Git\bin\bash.exe");
+
+        foreach (var c in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(c))
+                return c;
+        }
+
+        try
+        {
+            var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                try
+                {
+                    var full = Path.Combine(dir.Trim('"'), "bash.exe");
+                    if (File.Exists(full))
+                        return full;
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     private static string? FindNotepadPp()

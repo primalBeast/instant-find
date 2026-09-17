@@ -227,6 +227,8 @@
           <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
           <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
           <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
+          <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
+          <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.InputBindings>

@@ -50,7 +50,7 @@ Settings and the index database live under:
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, then the query box
 - Match Case or Whole Word leaves FTS and uses SQL `LIKE` / `=` (still capped by `maxResults`)
 - Results columns: **Name**, **Path**, **Size**, **Date Modified**
-- Context menu: Open, Open Containing Folder, **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing)
+- Context menu: Open, Open Containing Folder, **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
 - Filters:
   - Substring match via FTS5 (case-insensitive, unless Match Case / Whole Word)
