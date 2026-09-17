@@ -1,17 +1,48 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
 namespace InstantFind.Models;
 
 /// <summary>
 /// Indexed file or directory metadata shown in search results.
+/// Size and ModifiedUtc come from the SQLite index (set at crawl /
+/// FileWatcher IndexSinglePath), not live disk on every search.
 /// </summary>
-public sealed class FileEntry
+public sealed class FileEntry : INotifyPropertyChanged
 {
+    private long _size;
+    private DateTime _modifiedUtc;
+
     public long Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
     public string Directory { get; set; } = string.Empty;
     public string Extension { get; set; } = string.Empty;
-    public long Size { get; set; }
-    public DateTime ModifiedUtc { get; set; }
+
+    public long Size
+    {
+        get => _size;
+        set
+        {
+            if (_size == value) return;
+            _size = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SizeDisplay));
+        }
+    }
+
+    public DateTime ModifiedUtc
+    {
+        get => _modifiedUtc;
+        set
+        {
+            if (_modifiedUtc == value) return;
+            _modifiedUtc = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModifiedDisplay));
+        }
+    }
+
     public bool IsDirectory { get; set; }
 
     public string FullPath => Path;
@@ -19,6 +50,11 @@ public sealed class FileEntry
     public string SizeDisplay => IsDirectory ? "<DIR>" : FormatSize(Size);
 
     public string ModifiedDisplay => ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
     private static string FormatSize(long bytes)
     {

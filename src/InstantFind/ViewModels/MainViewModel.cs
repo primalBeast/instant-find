@@ -481,10 +481,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Ignore stale results if a newer search/refresh superseded this one
         if (generation != _searchGeneration) return;
 
-        // No-op when the ordered path set is unchanged — keeps SelectedItem / CanExecute.
+        // Same ordered paths: keep row instances (selection / context menu).
+        // Unchanged only if Size + ModifiedUtc also match; otherwise update in place
+        // so SizeDisplay / ModifiedDisplay repaint without Clear().
         if (SameOrderedPaths(Results, hits))
         {
+            if (!SameOrderedMetadata(Results, hits))
+                UpdateResultsMetadataInPlace(hits);
+
             IsSearching = false;
+            UpdateResultsStatus();
             return;
         }
 
@@ -513,7 +519,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         // User path turned the spinner on; silent path never did. Always clear here.
         IsSearching = false;
+        UpdateResultsStatus();
+    }
 
+    private void UpdateResultsStatus()
+    {
         if (string.IsNullOrWhiteSpace(Query))
         {
             StatusText = $"Ready — {_db.Count():N0} items indexed";
@@ -538,6 +548,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return false;
         }
         return true;
+    }
+
+    private static bool SameOrderedMetadata(IList<FileEntry> current, IReadOnlyList<FileEntry> hits)
+    {
+        for (var i = 0; i < hits.Count; i++)
+        {
+            if (current[i].Size != hits[i].Size) return false;
+            if (current[i].ModifiedUtc != hits[i].ModifiedUtc) return false;
+        }
+        return true;
+    }
+
+    private void UpdateResultsMetadataInPlace(IReadOnlyList<FileEntry> hits)
+    {
+        for (var i = 0; i < hits.Count; i++)
+        {
+            var row = Results[i];
+            var h = hits[i];
+            row.Id = h.Id;
+            row.Size = h.Size;
+            row.ModifiedUtc = h.ModifiedUtc;
+        }
     }
 
     private void OnIndexButton()

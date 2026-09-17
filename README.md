@@ -51,7 +51,7 @@ Settings and the index database live under:
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, then the query box
 - Match Case or Whole Word leaves FTS and uses SQL `LIKE` / `=` (still capped by `maxResults`)
-- Results columns: **Name**, **Path**, **Size**, **Date Modified**
+- Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index, not live disk)
 - Context menu: Open, Open Containing Folder, **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
 - Filters:
@@ -60,6 +60,7 @@ Settings and the index database live under:
   - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
 - Parallel multi-root indexing with progress status
 - Skips inaccessible directories instead of failing
+- **Size & Date Modified (v1.0.6)**: shown from the **SQLite index** (set at crawl / FileWatcher `IndexSinglePath`), not live disk on every search. Silent refresh and re-search now update Size/Modified **in place** when paths are unchanged but metadata changed (so the grid repaints without clearing selection / context menu)
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 

@@ -89,6 +89,7 @@ public sealed class FileWatcherService : IDisposable
             ScheduleIndexMutated();
         });
 
+    // Size/date writes: re-upsert via IndexSinglePath then notify UI to refresh.
     private void OnChanged(object sender, FileSystemEventArgs e) =>
         Safe(() =>
         {
