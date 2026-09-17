@@ -9,25 +9,13 @@
         Foreground="{StaticResource FgBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
   <DockPanel Margin="12">
-    <!-- Header: title + And/Or + rebuild -->
+    <!-- Header: title + rebuild -->
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
-        <TextBlock Text="Instant Find"
-                   FontSize="20" FontWeight="SemiBold"
-                   VerticalAlignment="Center"
-                   Margin="0,0,16,0"/>
-        <CheckBox Content="And"
-                  IsChecked="{Binding IsAndChecked}"
-                  VerticalAlignment="Center"
-                  Margin="0,0,10,0"
-                  Foreground="{StaticResource FgBrush}"
-                  ToolTip="All terms must match (default)"/>
-        <CheckBox Content="Or"
-                  IsChecked="{Binding IsOrChecked}"
-                  VerticalAlignment="Center"
-                  Foreground="{StaticResource FgBrush}"
-                  ToolTip="Any term may match. Both And and Or off = literal spaces in the name."/>
-      </StackPanel>
+      <TextBlock Text="Instant Find"
+                 FontSize="20" FontWeight="SemiBold"
+                 VerticalAlignment="Center"
+                 DockPanel.Dock="Left"
+                 Margin="0,0,16,0"/>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Content="Rebuild Index"
                 Command="{Binding RebuildIndexCommand}"
@@ -45,7 +33,7 @@
       </StackPanel>
     </DockPanel>
 
-    <!-- Search bar: clear / Match Case / Whole Word / box / spinner -->
+    <!-- Search bar: ✕ / Aa / W / box / And / Or / spinner -->
     <Border DockPanel.Dock="Top"
             Background="{StaticResource PanelBrush}"
             BorderBrush="{StaticResource BorderBrush}"
@@ -59,6 +47,8 @@
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
@@ -117,10 +107,27 @@
                  Foreground="{StaticResource FgBrush}"
                  BorderThickness="0"
                  CaretBrush="{StaticResource FgBrush}"
-                 VerticalContentAlignment="Center"/>
+                 VerticalContentAlignment="Center"
+                 Margin="0,0,8,0"/>
+
+        <!-- Right-justified match mode (mutual exclusive; both off = literal spaces) -->
+        <CheckBox Grid.Column="4"
+                  Content="And"
+                  IsChecked="{Binding IsAndChecked}"
+                  VerticalAlignment="Center"
+                  Margin="0,0,10,0"
+                  Foreground="{StaticResource FgBrush}"
+                  ToolTip="All terms must match (default)"/>
+        <CheckBox Grid.Column="5"
+                  Content="Or"
+                  IsChecked="{Binding IsOrChecked}"
+                  VerticalAlignment="Center"
+                  Margin="0,0,4,0"
+                  Foreground="{StaticResource FgBrush}"
+                  ToolTip="Any term may match. Both And and Or off = literal spaces in the name."/>
 
         <!-- Circular busy ring: rotates while IsSearching (user search only) -->
-        <Viewbox Grid.Column="4"
+        <Viewbox Grid.Column="6"
                  Width="20" Height="20"
                  Margin="8,0,0,0"
                  VerticalAlignment="Center"

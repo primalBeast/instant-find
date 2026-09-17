@@ -44,9 +44,10 @@ Settings and the index database live under:
 - Instant as-you-type search after the first index completes
 - **Live results refresh**: when the index updates (create/change/delete/rename via FileSystemWatcher), an active query re-runs automatically (debounced ~350ms) so new files appear within ~1 second — **silently** (no spinner / no “Searching…” flicker; status updates to the final count only)
 - **Stable context menu (v1.0.5)**: silent refresh skips Clear/rebuild when the hit set is unchanged, preserves selection when it changes, and pauses while the context menu is open (plus a right-click `ContextTarget`) so Open / folder / Notepad++ / CMD / Git Bash stay enabled
+- **And / Or in search bar (v1.0.5)**: moved from the title row into the search field row (right-justified, before the spinner)
 - Compact search-bar tools: **Aa** / **W** use MinWidth + padding so glyphs are not clipped; ✕ stays small
 - **Circular busy spinner** in the search bar for **user-initiated** searches only (typing / And-Or / MatchCase / WholeWord / Clear / drive chips) — not for watcher refreshes
-- **And / Or** checkboxes (right of title): default And; both off = literal whitespace (spaces must appear in the name)
+- **And / Or** checkboxes (right side of the search bar, before the spinner): default And; both off = literal whitespace (spaces must appear in the name)
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
 - Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, then the query box
 - Match Case or Whole Word leaves FTS and uses SQL `LIKE` / `=` (still capped by `maxResults`)
