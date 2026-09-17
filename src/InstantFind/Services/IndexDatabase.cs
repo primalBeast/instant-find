@@ -166,8 +166,9 @@ public sealed class IndexDatabase : IDisposable
         if (options.EnabledDrivePrefixes.Count == 0)
             return Array.Empty<FileEntry>();
 
-        // Match Case or Whole Word → leave FTS; use LIKE / = with LIMIT
-        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards;
+        // Match Case / Whole Word / wildcards / regex / path-scope listing → leave FTS
+        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards
+                        || query.UseRegex || !string.IsNullOrEmpty(query.PathScope);
         if (leaveFts)
             return SearchWithLike(query, maxResults, includeDirectories, options);
 
@@ -205,6 +206,7 @@ public sealed class IndexDatabase : IDisposable
             where.Add("f.is_directory = 0");
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "f.");
+        AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "f.");
 
         // Empty query with only ext: or completely empty — allow browsing limited set
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
@@ -223,7 +225,7 @@ public sealed class IndexDatabase : IDisposable
             while (reader.Read())
             {
                 var entry = ReadEntry(reader);
-                if (query.Terms.Count > 0)
+                if (query.Terms.Count > 0 || query.UseRegex || !string.IsNullOrEmpty(query.PathScope))
                 {
                     if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
                         continue;
@@ -264,6 +266,13 @@ public sealed class IndexDatabase : IDisposable
         var where = new List<string>();
         var termClauses = new List<string>();
 
+        // Regex: no SQL term prefilter — stream under drive/path scope and filter in memory
+        bool regexMode = query.UseRegex;
+        bool regexPathOnly = regexMode && string.IsNullOrEmpty(query.RegexPattern)
+                             && !string.IsNullOrEmpty(query.PathScope);
+
+        if (!regexMode)
+        {
         for (int i = 0; i < query.Terms.Count; i++)
         {
             var term = query.Terms[i];
@@ -308,6 +317,7 @@ public sealed class IndexDatabase : IDisposable
                 cmd.Parameters.AddWithValue(pname, pattern);
             }
         }
+        } // end !regexMode term prefilter
 
         if (termClauses.Count > 0)
         {
@@ -331,25 +341,40 @@ public sealed class IndexDatabase : IDisposable
             where.Add("is_directory = 0");
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "");
+        AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "");
 
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
             return results;
 
-        // ext-only query with no terms and no drive filter somehow
+        // Need at least drive/path/ext/term filter
         if (where.Count == 0)
             return results;
 
         sql.Append(" WHERE ").Append(string.Join(" AND ", where));
-        sql.Append(" LIMIT $limit;");
-        cmd.Parameters.AddWithValue("$limit", maxResults);
+
+        // Regex (non path-only): do not LIMIT in SQL — filter in memory up to maxResults.
+        // Path-only / normal LIKE: LIMIT in SQL then refine.
+        bool streamForRegex = regexMode && !regexPathOnly;
+        if (!streamForRegex)
+        {
+            sql.Append(" LIMIT $limit;");
+            // Fetch a cushion when WholeWord/MatchCase may reject rows after LIKE
+            cmd.Parameters.AddWithValue("$limit", maxResults);
+        }
+        else
+        {
+            sql.Append(';');
+        }
+
         cmd.CommandText = sql.ToString();
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             var entry = ReadEntry(reader);
-            // Refine with in-memory matcher so ? / * / case / whole-word semantics stay consistent
-            if (query.Terms.Count > 0 || query.Extensions.Count > 0)
+            // Refine with in-memory matcher (wildcards / case / whole-word / regex / path scope)
+            if (query.Terms.Count > 0 || query.Extensions.Count > 0 || query.UseRegex
+                || !string.IsNullOrEmpty(query.PathScope))
             {
                 if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
                     continue;
@@ -387,6 +412,37 @@ public sealed class IndexDatabase : IDisposable
             cmd.Parameters.AddWithValue(pname, QueryParser.EscapeLikeLiteral(prefix) + "%");
         }
         where.Add("(" + string.Join(" OR ", parts) + ")");
+    }
+
+    /// <summary>
+    /// Restricts results to the directory scope (path prefix). Includes the directory itself
+    /// and all descendants. Case follows MatchCase.
+    /// </summary>
+    private static void AppendPathScopeFilter(
+        List<string> where,
+        SqliteCommand cmd,
+        string? pathScope,
+        bool matchCase,
+        string alias)
+    {
+        if (string.IsNullOrEmpty(pathScope))
+            return;
+
+        var trimmed = pathScope.TrimEnd('\\', '/');
+        var childPrefix = trimmed + "\\";
+
+        if (matchCase)
+        {
+            where.Add($"({alias}path = $scopeExact OR {alias}path LIKE $scopeLike ESCAPE '\\')");
+            cmd.Parameters.AddWithValue("$scopeExact", trimmed);
+            cmd.Parameters.AddWithValue("$scopeLike", QueryParser.EscapeLikeLiteral(childPrefix) + "%");
+        }
+        else
+        {
+            where.Add($"(LOWER({alias}path) = LOWER($scopeExact) OR LOWER({alias}path) LIKE LOWER($scopeLike) ESCAPE '\\')");
+            cmd.Parameters.AddWithValue("$scopeExact", trimmed);
+            cmd.Parameters.AddWithValue("$scopeLike", QueryParser.EscapeLikeLiteral(childPrefix) + "%");
+        }
     }
 
     private static FileEntry ReadEntry(SqliteDataReader reader)

@@ -10,6 +10,8 @@ namespace InstantFind;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _vm;
+    private Point _dragStart;
+    private bool _dragPending;
 
     public MainWindow()
     {
@@ -38,6 +40,49 @@ public partial class MainWindow : Window
             _vm.ContextTarget = entry;
             ResultsGrid.SelectedItem = entry;
             _vm.SelectedItem = entry;
+        }
+    }
+
+    private void ResultsGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(null);
+        _dragPending = FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject) is not null;
+    }
+
+    private void ResultsGrid_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_dragPending || e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        var pos = e.GetPosition(null);
+        var dx = Math.Abs(pos.X - _dragStart.X);
+        var dy = Math.Abs(pos.Y - _dragStart.Y);
+        if (dx < SystemParameters.MinimumHorizontalDragDistance
+            && dy < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _dragPending = false;
+
+        // Prefer selected row; fall back to row under pointer
+        var entry = _vm.SelectedItem;
+        if (entry is null)
+        {
+            var row = FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject);
+            entry = row?.Item as FileEntry;
+        }
+
+        if (entry is null || string.IsNullOrWhiteSpace(entry.FullPath))
+            return;
+
+        // OLE file drop so Explorer can copy/move
+        var data = new DataObject(DataFormats.FileDrop, new[] { entry.FullPath });
+        try
+        {
+            DragDrop.DoDragDrop(ResultsGrid, data, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
+        }
+        catch
+        {
+            // Soft-fail — drag cancelled or target rejected
         }
     }
 

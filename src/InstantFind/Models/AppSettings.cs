@@ -24,6 +24,14 @@ public sealed class AppSettings
     public bool MatchCase { get; set; }
     public bool WholeWord { get; set; }
 
+    /// <summary>Treat search text as a .NET regex against the filename. Off by default.</summary>
+    public bool UseRegex { get; set; }
+
+    /// <summary>
+    /// Recent/favorite .exe paths for "Open with…" (most recent first, capped at 8).
+    /// </summary>
+    public List<string> OpenWithFavorites { get; set; } = new();
+
     public List<string> ExcludedDirectoryNames { get; set; } = new()
     {
         "$Recycle.Bin",

@@ -114,6 +114,23 @@ public sealed class SettingsService
             settings.EnabledDrives = DriveHelpers.GetDriveLetters(settings.IndexedRoots);
         else
             settings.EnabledDrives = DriveHelpers.NormalizeDriveLetters(settings.EnabledDrives);
+
+        if (settings.OpenWithFavorites is null)
+            settings.OpenWithFavorites = new List<string>();
+        else
+        {
+            // Cap + de-dupe while preserving order (most recent first)
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cleaned = new List<string>();
+            foreach (var p in settings.OpenWithFavorites)
+            {
+                if (string.IsNullOrWhiteSpace(p)) continue;
+                if (!seen.Add(p.Trim())) continue;
+                cleaned.Add(p.Trim());
+                if (cleaned.Count >= 8) break;
+            }
+            settings.OpenWithFavorites = cleaned;
+        }
     }
 }
 

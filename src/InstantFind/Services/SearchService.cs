@@ -15,10 +15,10 @@ public sealed class SearchService
 
     public IReadOnlyList<FileEntry> Search(string queryText, SearchOptions options)
     {
-        var parsed = QueryParser.Parse(queryText, options.MatchMode);
         if (string.IsNullOrWhiteSpace(queryText))
             return Array.Empty<FileEntry>();
 
+        var parsed = QueryParser.Parse(queryText, options.MatchMode, options.UseRegex);
         return _db.Search(parsed, _settings.MaxResults, _settings.IncludeDirectories, options);
     }
 }

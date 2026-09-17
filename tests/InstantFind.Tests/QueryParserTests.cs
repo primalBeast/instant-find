@@ -191,4 +191,145 @@ public class QueryParserTests
         Assert.True(DriveHelpers.IsRootEnabled(@"C:\Users", letters));
         Assert.False(DriveHelpers.IsRootEnabled(@"Z:\Data", letters));
     }
+
+    // ----- #4 Regex toggle -----
+
+    [Fact]
+    public void Regex_off_uses_substring_not_regex_metacharacters()
+    {
+        var q = QueryParser.Parse("report\\.pdf", useRegex: false);
+        Assert.False(q.UseRegex);
+        // Literal backslash-dot in substring mode
+        Assert.False(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Regex_on_matches_filename()
+    {
+        var q = QueryParser.Parse(@"^report.*\.pdf$", MatchMode.And, useRegex: true);
+        Assert.True(q.UseRegex);
+        Assert.Equal(@"^report.*\.pdf$", q.RegexPattern);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.True(QueryParser.Matches(q, "report_2024.pdf", @"C:\docs\report_2024.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "budget.pdf", @"C:\docs\budget.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report.docx", @"C:\docs\report.docx", "docx"));
+    }
+
+    [Fact]
+    public void Regex_respects_MatchCase()
+    {
+        var q = QueryParser.Parse("Report", MatchMode.And, useRegex: true);
+        Assert.True(QueryParser.Matches(q, "Report.pdf", @"C:\Report.pdf", "pdf", matchCase: true));
+        Assert.False(QueryParser.Matches(q, "report.pdf", @"C:\report.pdf", "pdf", matchCase: true));
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\report.pdf", "pdf", matchCase: false));
+    }
+
+    [Fact]
+    public void Regex_prefers_filename_not_path_folder()
+    {
+        // Without path separators in the pattern, folder "docs" must not satisfy "doc.*"
+        var q = QueryParser.Parse("doc.*", MatchMode.And, useRegex: true);
+        Assert.True(QueryParser.Matches(q, "document.pdf", @"C:\other\document.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Regex_path_pattern_can_match_full_path()
+    {
+        var q = QueryParser.Parse(@"docs\\report", MatchMode.And, useRegex: true);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report.pdf", @"C:\other\report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Regex_invalid_pattern_matches_nothing()
+    {
+        var q = QueryParser.Parse("[unterminated", MatchMode.And, useRegex: true);
+        Assert.False(QueryParser.Matches(q, "file.txt", @"C:\file.txt", "txt"));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_returns_null_for_regex()
+    {
+        var q = QueryParser.Parse("report", MatchMode.And, useRegex: true);
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+    }
+
+    // ----- #8 Path scope -----
+
+    [Theory]
+    [InlineData(@"C:\Projects\", @"C:\Projects\", "")]
+    [InlineData(@"C:\Projects\*.pdf", @"C:\Projects\", "*.pdf")]
+    [InlineData(@"C:\Projects\ budget", @"C:\Projects\", "budget")]
+    [InlineData(@"C:\Work\ report", @"C:\Work\", "report")]
+    [InlineData(@"C:\", @"C:\", "")]
+    public void PathScope_extracts_leading_backslash_path(string input, string expectedScope, string expectedRest)
+    {
+        Assert.True(QueryParser.TryExtractPathScope(input, out var scope, out var rest));
+        Assert.Equal(expectedScope, scope);
+        Assert.Equal(expectedRest, rest.TrimStart());
+    }
+
+    [Fact]
+    public void PathScope_absent_for_plain_query()
+    {
+        Assert.False(QueryParser.TryExtractPathScope("report.pdf", out _, out _));
+        var q = QueryParser.Parse("report.pdf");
+        Assert.Null(q.PathScope);
+    }
+
+    [Fact]
+    public void PathScope_only_lists_under_directory()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.Empty(q.Terms);
+        Assert.True(QueryParser.Matches(q, "Projects", @"C:\Projects", ""));
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\Projects\a.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "b.txt", @"C:\Projects\sub\b.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "c.txt", @"C:\Other\c.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathScope_with_wildcard_terms()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\*.pdf");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.True(q.HasWildcards);
+        Assert.Contains("*.pdf", q.Terms);
+        Assert.True(QueryParser.Matches(q, "a.pdf", @"C:\Projects\a.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "a.docx", @"C:\Projects\a.docx", "docx"));
+        Assert.False(QueryParser.Matches(q, "a.pdf", @"C:\Other\a.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void PathScope_with_substring_after_space()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\ budget");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.Contains("budget", q.Terms);
+        Assert.True(QueryParser.Matches(q, "budget.xlsx", @"C:\Projects\budget.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "budget.xlsx", @"C:\Other\budget.xlsx", "xlsx"));
+    }
+
+    [Fact]
+    public void PathScope_respects_MatchCase()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\");
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\Projects\a.txt", "txt", matchCase: true));
+        Assert.False(QueryParser.Matches(q, "a.txt", @"C:\projects\a.txt", "txt", matchCase: true));
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\projects\a.txt", "txt", matchCase: false));
+    }
+
+    [Fact]
+    public void PathScope_plus_regex()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\^budget.*", MatchMode.And, useRegex: true);
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.True(q.UseRegex);
+        Assert.Equal("^budget.*", q.RegexPattern);
+        Assert.True(QueryParser.Matches(q, "budget.xlsx", @"C:\Projects\budget.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "report.xlsx", @"C:\Projects\report.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "budget.xlsx", @"C:\Other\budget.xlsx", "xlsx"));
+    }
 }

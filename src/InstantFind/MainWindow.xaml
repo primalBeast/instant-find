@@ -72,7 +72,7 @@
       </Button>
     </DockPanel>
 
-    <!-- Search bar: ✕ / Aa / W / box / And / Or / spinner -->
+    <!-- Search bar: ✕ / Aa / W / .* / box / And / Or / spinner -->
     <Border DockPanel.Dock="Top"
             Background="{StaticResource PanelBrush}"
             BorderBrush="{StaticResource BorderBrush}"
@@ -82,6 +82,7 @@
             Margin="0,0,0,8">
       <Grid>
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
@@ -126,7 +127,7 @@
                       IsChecked="{Binding WholeWord}"
                       MinWidth="24" Height="22"
                       Padding="6,2"
-                      Margin="0,0,6,0"
+                      Margin="0,0,4,0"
                       FontSize="11"
                       FontWeight="SemiBold"
                       HorizontalContentAlignment="Center"
@@ -138,8 +139,26 @@
                       Cursor="Hand"
                       VerticalAlignment="Center"/>
 
+        <ToggleButton Grid.Column="3"
+                      Content=".*"
+                      IsChecked="{Binding UseRegex}"
+                      MinWidth="28" Height="22"
+                      Padding="6,2"
+                      Margin="0,0,6,0"
+                      FontSize="11"
+                      FontFamily="Consolas"
+                      FontWeight="SemiBold"
+                      HorizontalContentAlignment="Center"
+                      ClipToBounds="False"
+                      Background="{StaticResource PanelBrush}"
+                      Foreground="{StaticResource FgBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      ToolTip="Regex (filename; .NET). Case follows Aa. Leaves FTS."
+                      Cursor="Hand"
+                      VerticalAlignment="Center"/>
+
         <TextBox x:Name="SearchBox"
-                 Grid.Column="3"
+                 Grid.Column="4"
                  Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                  FontSize="16"
                  Background="Transparent"
@@ -150,14 +169,14 @@
                  Margin="0,0,8,0"/>
 
         <!-- Right-justified match mode (mutual exclusive; both off = literal spaces) -->
-        <CheckBox Grid.Column="4"
+        <CheckBox Grid.Column="5"
                   Content="And"
                   IsChecked="{Binding IsAndChecked}"
                   VerticalAlignment="Center"
                   Margin="0,0,10,0"
                   Foreground="{StaticResource FgBrush}"
                   ToolTip="All terms must match (default)"/>
-        <CheckBox Grid.Column="5"
+        <CheckBox Grid.Column="6"
                   Content="Or"
                   IsChecked="{Binding IsOrChecked}"
                   VerticalAlignment="Center"
@@ -166,7 +185,7 @@
                   ToolTip="Any term may match. Both And and Or off = literal spaces in the name."/>
 
         <!-- Circular busy ring: rotates while IsSearching (user search only) -->
-        <Viewbox Grid.Column="6"
+        <Viewbox Grid.Column="7"
                  Width="20" Height="20"
                  Margin="8,0,0,0"
                  VerticalAlignment="Center"
@@ -212,7 +231,7 @@
     </Border>
 
     <TextBlock DockPanel.Dock="Top"
-               Text="Filters: substrings, * and ? wildcards, ext:pdf  ·  And/Or/literal spaces  ·  Enter/double-click open  ·  Ctrl+Enter open folder"
+               Text="Filters: substrings, * ? wildcards, ext:pdf, .* regex, C:\path\ scope  ·  And/Or/literal  ·  drag results out  ·  Enter open  ·  Ctrl+Enter folder"
                Foreground="{StaticResource MutedBrush}"
                FontSize="11"
                Margin="0,0,0,8"
@@ -283,7 +302,9 @@
               AlternatingRowBackground="{StaticResource PanelBrush}"
               HorizontalGridLinesBrush="{StaticResource BorderBrush}"
               MouseDoubleClick="ResultsGrid_MouseDoubleClick"
-              PreviewMouseRightButtonDown="ResultsGrid_PreviewMouseRightButtonDown">
+              PreviewMouseRightButtonDown="ResultsGrid_PreviewMouseRightButtonDown"
+              PreviewMouseLeftButtonDown="ResultsGrid_PreviewMouseLeftButtonDown"
+              MouseMove="ResultsGrid_MouseMove">
       <DataGrid.Resources>
         <Style TargetType="DataGridColumnHeader">
           <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
@@ -315,6 +336,22 @@
                      Closed="ResultsContextMenu_Closed">
           <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
           <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
+          <MenuItem Header="Open with…">
+            <MenuItem Header="Favorite apps"
+                      ItemsSource="{Binding OpenWithFavorites}">
+              <MenuItem.ItemContainerStyle>
+                <Style TargetType="MenuItem">
+                  <Setter Property="Header" Value="{Binding DisplayName}"/>
+                  <Setter Property="ToolTip" Value="{Binding ExePath}"/>
+                  <Setter Property="Command"
+                          Value="{Binding DataContext.OpenWithFavoriteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                  <Setter Property="CommandParameter" Value="{Binding ExePath}"/>
+                </Style>
+              </MenuItem.ItemContainerStyle>
+            </MenuItem>
+            <Separator/>
+            <MenuItem Header="Choose another app…" Command="{Binding ChooseOpenWithAppCommand}"/>
+          </MenuItem>
           <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
           <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
           <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>

@@ -5,7 +5,8 @@ using InstantFind.Models;
 namespace InstantFind.Services;
 
 /// <summary>
-/// Parses Instant Find query syntax: substrings, * ? wildcards, and optional ext:pdf filters.
+/// Parses Instant Find query syntax: substrings, * ? wildcards, optional ext:pdf filters,
+/// optional directory path-scope (leading Windows path ending in \), and optional regex body.
 /// </summary>
 public sealed class ParsedQuery
 {
@@ -14,6 +15,18 @@ public sealed class ParsedQuery
     public bool HasWildcards { get; set; }
     public string Raw { get; init; } = string.Empty;
     public MatchMode Mode { get; init; } = MatchMode.And;
+
+    /// <summary>
+    /// Directory scope extracted from a leading Windows path that ends with '\'.
+    /// Example: @"C:\Projects\" from "C:\Projects\*.pdf". Null when absent.
+    /// </summary>
+    public string? PathScope { get; set; }
+
+    /// <summary>True when the UI regex toggle is on; <see cref="RegexPattern"/> holds the body.</summary>
+    public bool UseRegex { get; set; }
+
+    /// <summary>Regex body after path-scope stripping. May be empty (path-only listing).</summary>
+    public string RegexPattern { get; set; } = string.Empty;
 }
 
 public static class QueryParser
@@ -22,13 +35,46 @@ public static class QueryParser
         @"ext:(?<ext>[A-Za-z0-9_+-]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public static ParsedQuery Parse(string? input, MatchMode mode = MatchMode.And)
+    /// <summary>
+    /// Leading Windows drive path whose last segment ends with '\'.
+    /// Captures valid path segments only (* ? " &lt; &gt; | excluded) so
+    /// "C:\Projects\*.pdf" → scope=C:\Projects\, rest=*.pdf.
+    /// </summary>
+    private static readonly Regex PathScopeRegex = new(
+        @"^(?<scope>[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n]+\\)*)(?<rest>.*)$",
+        RegexOptions.Compiled);
+
+    public static ParsedQuery Parse(string? input, MatchMode mode = MatchMode.And, bool useRegex = false)
     {
         var result = new ParsedQuery { Raw = input ?? string.Empty, Mode = mode };
         if (string.IsNullOrWhiteSpace(input))
             return result;
 
         var working = input.Trim();
+
+        if (TryExtractPathScope(working, out var scope, out var remainder))
+        {
+            result.PathScope = scope;
+            working = remainder.TrimStart();
+        }
+
+        if (useRegex)
+        {
+            result.UseRegex = true;
+            result.RegexPattern = working;
+            // Still allow ext: filters alongside regex body
+            foreach (Match m in ExtFilter.Matches(working))
+            {
+                var ext = m.Groups["ext"].Value.TrimStart('.').ToLowerInvariant();
+                if (!string.IsNullOrEmpty(ext) && !result.Extensions.Contains(ext))
+                    result.Extensions.Add(ext);
+            }
+            // Regex body keeps ext: text as part of the pattern unless we strip it —
+            // prefer leaving the full remainder as the regex (ext: is for non-regex mode).
+            // Clear extensions when useRegex so ext: is literal in the pattern.
+            result.Extensions.Clear();
+            return result;
+        }
 
         foreach (Match m in ExtFilter.Matches(working))
         {
@@ -64,7 +110,49 @@ public static class QueryParser
     }
 
     /// <summary>
+    /// Extracts a directory scope when the query starts with a Windows path ending in '\'.
+    /// </summary>
+    public static bool TryExtractPathScope(string input, out string scope, out string remainder)
+    {
+        scope = string.Empty;
+        remainder = input;
+        if (string.IsNullOrEmpty(input))
+            return false;
+
+        var m = PathScopeRegex.Match(input);
+        if (!m.Success)
+            return false;
+
+        scope = m.Groups["scope"].Value;
+        // Require a real backslash after the drive (C:\ at minimum)
+        if (scope.Length < 3)
+            return false;
+
+        remainder = m.Groups["rest"].Value;
+        return true;
+    }
+
+    /// <summary>
+    /// True when <paramref name="fullPath"/> is the scoped directory or a descendant.
+    /// </summary>
+    public static bool IsUnderPathScope(string fullPath, string pathScope, bool matchCase)
+    {
+        if (string.IsNullOrEmpty(pathScope) || string.IsNullOrEmpty(fullPath))
+            return false;
+
+        var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var trimmed = pathScope.TrimEnd('\\', '/');
+        if (fullPath.Equals(trimmed, comparison))
+            return true;
+
+        var prefix = trimmed + "\\";
+        return fullPath.StartsWith(prefix, comparison);
+    }
+
+    /// <summary>
     /// Returns true if the filename/path matches the parsed query (in-memory matching for tests / fallback).
+    /// Regex mode: .NET regex against the filename first; also tries full path when the pattern
+    /// contains a path separator (same idea as path-shaped wildcards).
     /// </summary>
     public static bool Matches(
         ParsedQuery query,
@@ -74,6 +162,13 @@ public static class QueryParser
         bool matchCase = false,
         bool wholeWord = false)
     {
+        if (!string.IsNullOrEmpty(query.PathScope)
+            && !IsUnderPathScope(fullPath, query.PathScope, matchCase))
+            return false;
+
+        if (query.UseRegex)
+            return MatchesRegex(query, name, fullPath, extension, matchCase);
+
         if (query.Extensions.Count > 0)
         {
             var ext = extension.TrimStart('.').ToLowerInvariant();
@@ -81,8 +176,11 @@ public static class QueryParser
                 return false;
         }
 
+        // Path-scope only (no terms): everything under the directory matches
         if (query.Terms.Count == 0)
-            return query.Extensions.Count > 0 || string.IsNullOrWhiteSpace(query.Raw);
+            return query.Extensions.Count > 0
+                   || !string.IsNullOrEmpty(query.PathScope)
+                   || string.IsNullOrWhiteSpace(query.Raw);
 
         var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
@@ -104,6 +202,50 @@ public static class QueryParser
         }
 
         return true;
+    }
+
+    private static bool MatchesRegex(
+        ParsedQuery query,
+        string name,
+        string fullPath,
+        string extension,
+        bool matchCase)
+    {
+        if (query.Extensions.Count > 0)
+        {
+            var ext = extension.TrimStart('.').ToLowerInvariant();
+            if (!query.Extensions.Any(e => e.Equals(ext, StringComparison.OrdinalIgnoreCase)))
+                return false;
+        }
+
+        // Empty regex body with path scope → list everything under scope
+        if (string.IsNullOrEmpty(query.RegexPattern))
+            return !string.IsNullOrEmpty(query.PathScope);
+
+        Regex rx;
+        try
+        {
+            var options = RegexOptions.CultureInvariant;
+            if (!matchCase)
+                options |= RegexOptions.IgnoreCase;
+            rx = new Regex(query.RegexPattern, options);
+        }
+        catch (ArgumentException)
+        {
+            return false; // invalid pattern → no match
+        }
+
+        // Prefer filename first (same spirit as shell wildcards)
+        if (rx.IsMatch(name))
+            return true;
+        if (rx.IsMatch(System.IO.Path.GetFileName(fullPath)))
+            return true;
+
+        // Path patterns only when the regex itself contains a path separator
+        if (query.RegexPattern.Contains('\\') || query.RegexPattern.Contains('/'))
+            return rx.IsMatch(fullPath);
+
+        return false;
     }
 
     public static bool TermMatches(string term, string name, string fullPath)
@@ -252,12 +394,12 @@ public static class QueryParser
 
     /// <summary>
     /// Builds an FTS5 MATCH expression for plain (non-wildcard) substring terms only.
-    /// Returns null when the query has wildcards or no usable terms — callers should use LIKE instead.
-    /// Match Case / Whole Word must leave FTS (caller responsibility).
+    /// Returns null when the query has wildcards, regex, or no usable terms — callers should use LIKE instead.
+    /// Match Case / Whole Word / Regex must leave FTS (caller responsibility).
     /// </summary>
     public static string? BuildFtsMatch(ParsedQuery query)
     {
-        if (query.HasWildcards)
+        if (query.UseRegex || query.HasWildcards)
             return null;
 
         if (query.Terms.Count == 0)

@@ -29,6 +29,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _searchGeneration;
     private bool _matchCase;
     private bool _wholeWord;
+    private bool _useRegex;
     private bool _isAndChecked = true;
     private bool _isOrChecked;
     private bool _syncingMode;
@@ -54,6 +55,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ApplyMatchModeFromSettings();
         _matchCase = _settings.MatchCase;
         _wholeWord = _settings.WholeWord;
+        _useRegex = _settings.UseRegex;
+        OpenWithFavorites = new ObservableCollection<OpenWithFavorite>(
+            (_settings.OpenWithFavorites ?? new List<string>())
+                .Select(p => new OpenWithFavorite(p)));
 
         _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _debounce.Tick += (_, _) =>
@@ -73,6 +78,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OpenInGitBashCommand = new RelayCommand(
             _ => OpenInGitBash(),
             _ => ActionTarget is not null);
+        OpenWithFavoriteCommand = new RelayCommand(
+            p => OpenWithExe(p as string),
+            p => ActionTarget is not null && !ActionTarget.IsDirectory
+                 && p is string exe && !string.IsNullOrWhiteSpace(exe));
+        ChooseOpenWithAppCommand = new RelayCommand(
+            _ => ChooseOpenWithApp(),
+            _ => ActionTarget is not null && !ActionTarget.IsDirectory);
         IndexButtonCommand = new RelayCommand(_ => OnIndexButton());
         ClearQueryCommand = new RelayCommand(_ => ClearQuery());
 
@@ -95,6 +107,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<FileEntry> Results { get; }
     public ObservableCollection<DriveChip> DriveChips { get; }
+    public ObservableCollection<OpenWithFavorite> OpenWithFavorites { get; }
 
     public event Action? FocusSearchRequested;
 
@@ -176,6 +189,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (Set(ref _wholeWord, value))
             {
                 _settings.WholeWord = value;
+                PersistSettings();
+                ScheduleSearch();
+            }
+        }
+    }
+
+    /// <summary>Treat query as .NET regex against the filename. Persisted; off by default.</summary>
+    public bool UseRegex
+    {
+        get => _useRegex;
+        set
+        {
+            if (Set(ref _useRegex, value))
+            {
+                _settings.UseRegex = value;
                 PersistSettings();
                 ScheduleSearch();
             }
@@ -280,6 +308,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand EditWithNotepadPpCommand { get; }
     public ICommand OpenInCmdCommand { get; }
     public ICommand OpenInGitBashCommand { get; }
+    public ICommand OpenWithFavoriteCommand { get; }
+    public ICommand ChooseOpenWithAppCommand { get; }
     public ICommand IndexButtonCommand { get; }
     public ICommand ClearQueryCommand { get; }
 
@@ -407,6 +437,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             MatchMode = _settings.MatchMode,
             MatchCase = MatchCase,
             WholeWord = WholeWord,
+            UseRegex = UseRegex,
             EnabledDrivePrefixes = DriveHelpers.ToPathPrefixes(_settings.EnabledDrives ?? new List<string>())
         };
     }
@@ -780,6 +811,90 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public void OpenWithExe(string? exePath)
+    {
+        var target = ActionTarget;
+        if (target is null || target.IsDirectory) return;
+        if (string.IsNullOrWhiteSpace(exePath)) return;
+
+        if (!File.Exists(exePath))
+        {
+            MessageBox.Show(
+                "Application not found:\n" + exePath,
+                "Instant Find",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = "\"" + target.FullPath + "\"",
+                UseShellExecute = false
+            });
+            RememberOpenWithFavorite(exePath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Could not open with that app: " + ex.Message,
+                "Instant Find",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    public void ChooseOpenWithApp()
+    {
+        var target = ActionTarget;
+        if (target is null || target.IsDirectory) return;
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose an application",
+            Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*",
+            DefaultExt = ".exe",
+            CheckFileExists = true
+        };
+
+        var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrEmpty(pf) && Directory.Exists(pf))
+            dlg.InitialDirectory = pf;
+
+        if (dlg.ShowDialog() != true)
+            return;
+
+        OpenWithExe(dlg.FileName);
+    }
+
+    private void RememberOpenWithFavorite(string exePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath)) return;
+        exePath = exePath.Trim();
+
+        // Move to front / insert
+        for (var i = OpenWithFavorites.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(OpenWithFavorites[i].ExePath, exePath, StringComparison.OrdinalIgnoreCase))
+                OpenWithFavorites.RemoveAt(i);
+        }
+        OpenWithFavorites.Insert(0, new OpenWithFavorite(exePath));
+        while (OpenWithFavorites.Count > 8)
+            OpenWithFavorites.RemoveAt(OpenWithFavorites.Count - 1);
+
+        SyncOpenWithFavoritesToSettings();
+        PersistSettings();
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void SyncOpenWithFavoritesToSettings()
+    {
+        _settings.OpenWithFavorites = OpenWithFavorites.Select(f => f.ExePath).ToList();
+    }
+
     private static string? FindGitBash()
     {
         var candidates = new List<string>();
@@ -879,6 +994,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SyncEnabledDrivesFromChips();
         _settings.MatchCase = MatchCase;
         _settings.WholeWord = WholeWord;
+        _settings.UseRegex = UseRegex;
+        SyncOpenWithFavoritesToSettings();
         _settingsService.Save(_settings);
     }
 
