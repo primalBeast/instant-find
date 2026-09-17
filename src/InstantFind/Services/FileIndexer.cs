@@ -94,6 +94,7 @@ public sealed class FileIndexer
             long filesIndexed = 0;
             long dirsScanned = 0;
             var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+            var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings);
             var roots = _settings.IndexedRoots
                 .Where(Directory.Exists)
                 .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? new List<string>()))
@@ -128,7 +129,7 @@ public sealed class FileIndexer
                         try
                         {
                             Interlocked.Increment(ref dirsScanned);
-                            EnumerateDirectory(dir, exclude, pending, localBatch, ref filesIndexed, progress, ct, rebuildDb);
+                            EnumerateDirectory(dir, exclude, excludePrefixes, pending, localBatch, ref filesIndexed, progress, ct, rebuildDb);
 
                             if (localBatch.Count >= 200)
                             {
@@ -255,6 +256,7 @@ public sealed class FileIndexer
     private void EnumerateDirectory(
         string dir,
         HashSet<string> exclude,
+        IReadOnlyList<string> excludePrefixes,
         ConcurrentQueue<string> pending,
         List<FileEntry> localBatch,
         ref long filesIndexed,
@@ -262,6 +264,9 @@ public sealed class FileIndexer
         CancellationToken ct,
         IndexDatabase targetDb)
     {
+        if (ExcludePaths.IsUnderAny(dir, excludePrefixes))
+            return;
+
         IEnumerable<string> entries;
         try
         {
@@ -297,6 +302,8 @@ public sealed class FileIndexer
             if (isDir)
             {
                 if (exclude.Contains(name))
+                    continue;
+                if (ExcludePaths.IsUnderAny(entryPath, excludePrefixes))
                     continue;
 
                 pending.Enqueue(entryPath);

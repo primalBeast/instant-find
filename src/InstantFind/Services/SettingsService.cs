@@ -132,6 +132,21 @@ public sealed class SettingsService
             settings.OpenWithFavorites = cleaned;
         }
 
+        if (settings.CheckedCommonExcludeIds is null)
+            settings.CheckedCommonExcludeIds = new List<string>();
+        if (settings.CustomExcludePaths is null)
+            settings.CustomExcludePaths = new List<string>();
+        if (!settings.CommonExcludesInitialized)
+        {
+            settings.CheckedCommonExcludeIds = ExcludePaths.DefaultCheckedIds();
+            settings.CommonExcludesInitialized = true;
+        }
+        settings.CustomExcludePaths = settings.CustomExcludePaths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (settings.SavedFilters is null)
             settings.SavedFilters = new List<SavedFilter>();
         else

@@ -417,6 +417,7 @@ public sealed class IndexDatabase : IDisposable
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "f.");
         AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "f.");
+        AppendExcludeFilter(where, cmd, options.ExcludePathPrefixes, alias: "f.");
         AppendSizeDateFilters(where, cmd, query, alias: "f.");
 
         // Empty query with only ext: or completely empty — allow browsing limited set
@@ -576,6 +577,7 @@ public sealed class IndexDatabase : IDisposable
 
         AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "");
         AppendPathScopeFilter(where, cmd, query.PathScope, options.MatchCase, alias: "");
+        AppendExcludeFilter(where, cmd, options.ExcludePathPrefixes, alias: "");
         AppendSizeDateFilters(where, cmd, query, alias: "");
 
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
@@ -625,6 +627,31 @@ public sealed class IndexDatabase : IDisposable
         }
 
         return results;
+    }
+
+
+    /// <summary>Hide paths under any configured exclude prefix (search-time).</summary>
+    private static void AppendExcludeFilter(
+        List<string> where,
+        SqliteCommand cmd,
+        IReadOnlyList<string> prefixes,
+        string alias)
+    {
+        if (prefixes is null || prefixes.Count == 0)
+            return;
+
+        for (int i = 0; i < prefixes.Count; i++)
+        {
+            var pname = $"$ex{i}";
+            var exact = $"$exExact{i}";
+            var prefix = prefixes[i];
+            if (!prefix.EndsWith('\\') && !prefix.EndsWith('/'))
+                prefix += "\\";
+            var trimmed = prefix.TrimEnd('\\', '/');
+            where.Add($"NOT (LOWER({alias}path) = LOWER({exact}) OR LOWER({alias}path) LIKE LOWER({pname}) ESCAPE '\\')");
+            cmd.Parameters.AddWithValue(exact, trimmed);
+            cmd.Parameters.AddWithValue(pname, QueryParser.EscapeLikeLiteral(prefix) + "%");
+        }
     }
 
     private static void AppendDriveFilter(

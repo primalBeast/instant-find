@@ -14,4 +14,8 @@ public sealed class SearchOptions
 
     /// <summary>Enabled drive roots as prefixes, e.g. @"C:\". Empty = no results.</summary>
     public IReadOnlyList<string> EnabledDrivePrefixes { get; init; } = Array.Empty<string>();
+
+    /// <summary>Normalized path prefixes to hide from results (trailing separator).</summary>
+    public IReadOnlyList<string> ExcludePathPrefixes { get; init; } = Array.Empty<string>();
 }
+

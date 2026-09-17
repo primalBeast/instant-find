@@ -220,7 +220,7 @@
                         Foreground="{StaticResource FgBrush}"
                         BorderBrush="{StaticResource BorderBrush}"
                         Cursor="Hand"
-                        ToolTip="Size, date, type, and saved filters"
+                        ToolTip="Size, date, type, excludes, and saved filters"
                         VerticalAlignment="Center">
             <ToggleButton.Style>
               <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
@@ -245,8 +245,8 @@
                     BorderThickness="1"
                     CornerRadius="4"
                     Padding="12"
-                    MinWidth="280" MaxWidth="340"
-                    MaxHeight="460">
+                    MinWidth="300" MaxWidth="380"
+                    MaxHeight="560">
               <Border.Effect>
                 <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.45" Color="#000000"/>
               </Border.Effect>
@@ -335,6 +335,55 @@
                                 Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
                                 BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"
                                 ToolTip="{Binding Key, StringFormat={}{0}:}"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+
+                  <DockPanel Margin="0,8,0,4">
+                    <TextBlock Text="Exclude" FontWeight="SemiBold" FontSize="11"
+                               Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center"/>
+                    <Button DockPanel.Dock="Right"
+                            Content="+"
+                            Command="{Binding AddCustomExcludeCommand}"
+                            Width="24" Height="22"
+                            FontSize="14" FontWeight="Bold"
+                            Background="{StaticResource AccentBrush}" Foreground="White"
+                            BorderThickness="0" Cursor="Hand"
+                            ToolTip="Add a folder to exclude"/>
+                  </DockPanel>
+                  <TextBlock Text="Common folders" FontSize="10"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <ItemsControl ItemsSource="{Binding CommonExcludes}" Margin="0,0,0,8">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                  Content="{Binding Label}"
+                                  Margin="0,0,0,3"
+                                  FontSize="11"
+                                  Foreground="{StaticResource FgBrush}"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Text="Your folders" FontSize="10"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <ItemsControl ItemsSource="{Binding CustomExcludePaths}" Margin="0,0,0,10">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel Margin="0,0,0,4">
+                          <Button DockPanel.Dock="Right" Content="✕"
+                                  Command="{Binding DataContext.RemoveCustomExcludeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}"
+                                  Width="22" Height="20" FontSize="10"
+                                  Background="Transparent" Foreground="#E81123"
+                                  BorderThickness="0" Cursor="Hand" ToolTip="Remove exclude"/>
+                          <TextBlock Text="{Binding}" FontSize="11"
+                                     TextTrimming="CharacterEllipsis"
+                                     Foreground="{StaticResource FgBrush}"
+                                     VerticalAlignment="Center"
+                                     ToolTip="{Binding}"/>
+                        </DockPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

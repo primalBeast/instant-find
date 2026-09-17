@@ -62,6 +62,10 @@
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
                      Text="Double-click to open. Right-click for Open with…, Notepad++, Command Prompt, Git Bash, and Show Extension / Attributes columns. Drag rows out to Explorer or other apps. Drive chips toggle which drives appear in results (they do not rebuild the index)."/>
 
+          <TextBlock Text="Exclude folders" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
+          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
+                     Text="Filter → Exclude: check common folders (C:\Windows, Program Files, …) or add your own with +. Excluded paths are hidden from results immediately and skipped on the next Rebuild Index."/>
+
           <TextBlock Text="Index" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
                      Text="Rebuild Index scans local drives in user mode (SQLite + FileSystemWatcher). Cancel stops a rebuild safely. Instant Find never uses kernel drivers, raw MFT, or USN journal scraping — Crowdstrike-friendly by design."/>

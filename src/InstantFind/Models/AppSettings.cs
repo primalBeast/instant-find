@@ -50,4 +50,13 @@ public sealed class AppSettings
         ".git",
         ".svn"
     };
+
+    /// <summary>Ids from ExcludePaths.CommonCatalog that are checked in the Filter popup.</summary>
+    public List<string> CheckedCommonExcludeIds { get; set; } = new();
+
+    /// <summary>User-added folder paths to exclude (Filter popup +).</summary>
+    public List<string> CustomExcludePaths { get; set; } = new();
+
+    /// <summary>True once default common-exclude checkboxes have been applied.</summary>
+    public bool CommonExcludesInitialized { get; set; }
 }

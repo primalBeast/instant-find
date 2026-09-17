@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.14) | https://github.com/primalBeast/instant-find/releases/download/v1.0.14/InstantFind-win-x64.zip |
+| Direct zip (v1.0.15) | https://github.com/primalBeast/instant-find/releases/download/v1.0.15/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -40,11 +40,13 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.14)
+## Features (v1.0.15)
 
-- **Help (v1.0.14)**: `?` button top-right opens a themed Help window (Esc to close). Drive chip tooltips say “toggle drive in results” only.
+- **Exclude (v1.0.15)**: Filter popup → Exclude. Common folders with checkboxes (defaults: Windows, Program Files, Recycle Bin, System Volume Information, Recovery) plus custom folders via **+**. Search hides them; rebuild skips them.
 
-- **NOT / Filter popup / size·date / macros / columns (v1.0.14)**:
+- **Help (v1.0.15)**: `?` button top-right opens a themed Help window (Esc to close). Drive chip tooltips say “toggle drive in results” only.
+
+- **NOT / Filter popup / size·date / macros / columns (v1.0.15)**:
   - **NOT**: Everything-style `!term` / `!*.tmp` excludes matches (works with And/Or, path scope, macros).
   - **Filter** button (left of And/Or): anchored popup (app theme) with Size / Date modified / Type / Saved filters. Active filters highlight the button; **Clear filters** removes `size:`, `dm:`, and type macros.
   - **Size query**: `size:>1mb`, `size:<100kb`, `size:1mb..10mb` (units b/kb/mb/gb).
@@ -93,7 +95,7 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.14)
+## Query syntax (v1.0.15)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -135,8 +137,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.14 && git push origin v1.0.14`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.14`
+1. **Tag** — push a version tag: `git tag v1.0.15 && git push origin v1.0.15`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.15`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

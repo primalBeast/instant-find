@@ -67,6 +67,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 .Select(p => new OpenWithFavorite(p)));
         SavedFilters = new ObservableCollection<SavedFilter>(
             _settings.SavedFilters ?? new List<SavedFilter>());
+        CustomExcludePaths = new ObservableCollection<string>(
+            _settings.CustomExcludePaths ?? new List<string>());
+        var checkedIds = new HashSet<string>(
+            _settings.CheckedCommonExcludeIds ?? new List<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        CommonExcludes = new ObservableCollection<CommonExcludeItem>(
+            ExcludePaths.CommonCatalog.Select(c =>
+            {
+                var item = new CommonExcludeItem(c.Id, c.Label, checkedIds.Contains(c.Id));
+                item.Changed += (_, _) => OnCommonExcludeChanged();
+                return item;
+            }));
         _showExtensionColumn = _settings.ShowExtensionColumn;
         _showAttributesColumn = _settings.ShowAttributesColumn;
 
@@ -105,6 +117,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SaveCurrentFilterCommand = new RelayCommand(_ => SaveCurrentFilter(), _ => !string.IsNullOrWhiteSpace(NewFilterName) && !string.IsNullOrWhiteSpace(Query));
         ActivateSavedFilterCommand = new RelayCommand(p => ActivateSavedFilter(p as SavedFilter));
         DeleteSavedFilterCommand = new RelayCommand(p => DeleteSavedFilter(p as SavedFilter));
+        AddCustomExcludeCommand = new RelayCommand(_ => AddCustomExclude());
+        RemoveCustomExcludeCommand = new RelayCommand(p => RemoveCustomExclude(p as string));
         ToggleExtensionColumnCommand = new RelayCommand(_ => ShowExtensionColumn = !ShowExtensionColumn);
         ToggleAttributesColumnCommand = new RelayCommand(_ => ShowAttributesColumn = !ShowAttributesColumn);
 
@@ -129,6 +143,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<DriveChip> DriveChips { get; }
     public ObservableCollection<OpenWithFavorite> OpenWithFavorites { get; }
     public ObservableCollection<SavedFilter> SavedFilters { get; }
+    public ObservableCollection<CommonExcludeItem> CommonExcludes { get; }
+    public ObservableCollection<string> CustomExcludePaths { get; }
     public IReadOnlyList<FileTypeMacros.TypeGroup> TypeFilterGroups { get; } = FileTypeMacros.Groups;
 
     public event Action? FocusSearchRequested;
@@ -343,6 +359,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand SaveCurrentFilterCommand { get; }
     public ICommand ActivateSavedFilterCommand { get; }
     public ICommand DeleteSavedFilterCommand { get; }
+    public ICommand AddCustomExcludeCommand { get; }
+    public ICommand RemoveCustomExcludeCommand { get; }
     public ICommand ToggleExtensionColumnCommand { get; }
     public ICommand ToggleAttributesColumnCommand { get; }
 
@@ -353,7 +371,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>True when the query contains size:/dm:/type-macro tokens.</summary>
-    public bool HasActiveFilters => QueryFilterTokens.HasStructuredFilters(Query);
+    public bool HasActiveFilters =>
+        QueryFilterTokens.HasStructuredFilters(Query)
+        || CommonExcludes.Any(c => c.IsChecked)
+        || CustomExcludePaths.Count > 0;
+
 
     public bool ShowExtensionColumn
     {
@@ -578,6 +600,57 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PersistSettings();
     }
 
+    private void OnCommonExcludeChanged()
+    {
+        _settings.CheckedCommonExcludeIds = CommonExcludes
+            .Where(c => c.IsChecked)
+            .Select(c => c.Id)
+            .ToList();
+        _settings.CommonExcludesInitialized = true;
+        PersistSettings();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
+        ScheduleSearch();
+    }
+
+    private void AddCustomExclude()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Exclude folder from Instant Find"
+        };
+        if (dlg.ShowDialog() != true)
+            return;
+        var path = dlg.FolderName?.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        if (CustomExcludePaths.Any(x => x.Equals(path, StringComparison.OrdinalIgnoreCase)))
+            return;
+        CustomExcludePaths.Add(path);
+        SyncCustomExcludesToSettings();
+        PersistSettings();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
+        ScheduleSearch();
+    }
+
+    private void RemoveCustomExclude(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        var match = CustomExcludePaths.FirstOrDefault(x => x.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+            return;
+        CustomExcludePaths.Remove(match);
+        SyncCustomExcludesToSettings();
+        PersistSettings();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
+        ScheduleSearch();
+    }
+
+    private void SyncCustomExcludesToSettings()
+    {
+        _settings.CustomExcludePaths = CustomExcludePaths.ToList();
+    }
+
     private void SyncSavedFiltersToSettings()
     {
         _settings.SavedFilters = SavedFilters.ToList();
@@ -591,7 +664,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             MatchCase = MatchCase,
             WholeWord = WholeWord,
             UseRegex = UseRegex,
-            EnabledDrivePrefixes = DriveHelpers.ToPathPrefixes(_settings.EnabledDrives ?? new List<string>())
+            EnabledDrivePrefixes = DriveHelpers.ToPathPrefixes(_settings.EnabledDrives ?? new List<string>()),
+            ExcludePathPrefixes = ExcludePaths.ResolveActivePrefixes(_settings)
         };
     }
 
