@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.11) | https://github.com/primalBeast/instant-find/releases/download/v1.0.11/InstantFind-win-x64.zip |
+| Direct zip (v1.0.12) | https://github.com/primalBeast/instant-find/releases/download/v1.0.12/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -40,15 +40,16 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.11)
+## Features (v1.0.12)
 
+- **Path scope + path term spaces (v1.0.12)**: `C:\Logs  \72` (spaces, no trailing `\` after the folder) scopes to `C:\Logs\` and applies Everything-like segment prefix `\72`. Also `C:\Logs\`, `C:\Logs\ \72` / `C:\Logs\\72`, global `\72`, and normal name search under a scoped path. Search always completes (spinner off); silent refresh no longer orphans in-flight searches.
 - **Path term `\72` (v1.0.11)**: Everything-like — a term starting with `\` matches a **path/directory segment** that **starts with** the rest (e.g. `\72` hits `C:\data\72folder\…` and `C:\docs\72report.txt`, but not bare-name FTS that ignores `\` and would match `6728` / `x72y`). Leaves FTS; SQL `LIKE` on `path` only. Drive path-scope unchanged: `C:\foo\` still scopes.
 - **App icon (v1.0.10)**: Windows exe / window icon from `Assets/app.ico` (multi-size). Source art: ![Instant Find icon](src/InstantFind/Assets/app-icon.png)
 - **Literal `_` / `-` in search (v1.0.10)**: FTS5 `unicode61` treats `_` and `-` (and other non-alphanumeric characters) as token separators, so a plain FTS query like `72_` previously matched names such as `6728`. Terms containing those characters now **leave FTS** and use SQL `LIKE` with `ESCAPE '\'` (same as wildcards), so `72_` requires a literal underscore and `a-b` requires a literal hyphen.
 - **Atomic rebuild + delete prune (v1.0.9)**: Rebuild writes to a temporary `index-rebuild.db` beside the live index and **atomically swaps** only on success. Cancel or crash mid-rebuild **keeps the previous live index** (leftover rebuild files are discarded on next launch). Progress shows **Preparing rebuild…** / **Scanning… N items — path** immediately (no stuck “Starting index…”). Cancel is cooperative; UI shows **Indexing cancelled — previous index kept.** and **restarts watchers**. Deleted/renamed folders remove rows by `path` and by `directory` (exact + under). Watcher buffer overflows schedule a **background prune** of missing paths; search refresh also drops hits that no longer exist on disk.
 - **Search perf + regex fixes (v1.0.8)**: path scope no longer forces a slow LIKE path — FTS stays on with a SQL path prefix filter. Only Match Case / Whole Word / wildcards / Regex leave FTS. Plain FTS skips redundant per-row Matches. `INDEX` on `files(path)`. Regex: shell-glob fallback so `*.pdf` with Regex on finds files; longest alphanumeric literal used as a SQL `LIKE` prefilter; invalid patterns (e.g. `(?`) show status **Invalid regex** (no crash). Scope rule: only when the path prefix **ends with `\`** — `C:\Projects` is a normal FTS term; `C:\Projects\` / `C:\Projects\foo` / `C:\` scope as expected.
 - **Regex toggle (`.*`) (v1.0.7+)**: compact button to the right of **W**. Query body is a **.NET regex** against the **filename** (path too if the pattern has `\`/`/`). If compile fails and the pattern looks like a shell glob (`*`/`?` without `(`, `[`, or `{`), converts glob→regex. Case follows **Aa**. Leaves FTS; capped by `maxResults`. Persisted (`useRegex`, default off).
-- **Path scope (v1.0.7+)**: leading Windows path **ending in `\`** scopes results (e.g. `C:\Work\`, `C:\Projects\*.pdf`). `C:\Projects` (no trailing `\`) is **not** a scope. Path-only (`C:\Projects\`) lists under that folder. Kept with FTS when possible (v1.0.8). Drive chips still apply.
+- **Path scope (v1.0.7+ / v1.0.12)**: leading Windows path **ending in `\`** scopes results (e.g. `C:\Work\`, `C:\Projects\*.pdf`). `C:\Projects` (no trailing `\`) is **not** a scope — **except** when followed by whitespace and a path term (`C:\Logs  \72` → scope `C:\Logs\` + `\72`, v1.0.12). Path-only (`C:\Projects\`) lists under that folder. Kept with FTS when possible (v1.0.8). Drive chips still apply.
 - **Open with… (v1.0.7)**: context menu → **Open with…** → **Favorite apps** (recent exe paths, last 8, in `settings.json`) and **Choose another app…** (OpenFileDialog starting in Program Files). Files only; soft-fails if the exe is missing.
 - **Drag results out (v1.0.7)**: drag a result row from the grid to Explorer / other drop targets (OLE `FileDrop` with the real path). Uses the selected row.
 - Instant as-you-type search after the first index completes
@@ -103,8 +104,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.11 && git push origin v1.0.11`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.11`
+1. **Tag** — push a version tag: `git tag v1.0.12 && git push origin v1.0.12`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.12`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

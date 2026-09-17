@@ -527,4 +527,81 @@ public class QueryParserTests
     }
 
 
+
+    // ----- v1.0.12: C:\Logs  \72 path-scope + path-term (spaces, no trailing \) -----
+
+    [Theory]
+    [InlineData(@"C:\Logs  \72")]
+    [InlineData(@"C:\Logs \72")]
+    public void PathScope_space_before_path_term_scopes_dir_without_trailing_slash(string input)
+    {
+        // Repro: spaces between C:\Logs and \72 must NOT invent scope "C:\Logs  \"
+        Assert.True(QueryParser.TryExtractPathScope(input, out var scope, out var rest));
+        Assert.Equal(@"C:\Logs\", scope);
+        Assert.Equal(@"\72", rest.TrimStart());
+
+        var q = QueryParser.Parse(input);
+        Assert.Equal(@"C:\Logs\", q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.DoesNotContain("Logs", q.Terms);
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+
+        Assert.True(QueryParser.Matches(q, "72folder", @"C:\Logs\72folder", ""));
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\Logs\72reports\a.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "72folder", @"C:\Other\72folder", ""));
+        Assert.False(QueryParser.Matches(q, "x72.txt", @"C:\Logs\x72.txt", "txt"));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Logs\ \72")]
+    [InlineData(@"C:\Logs\\72")]
+    public void PathScope_trailing_slash_plus_path_term(string input)
+    {
+        var q = QueryParser.Parse(input);
+        Assert.Equal(@"C:\Logs\", q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.True(QueryParser.Matches(q, "72x", @"C:\Logs\72x", ""));
+        Assert.False(QueryParser.Matches(q, "72x", @"C:\Other\72x", ""));
+    }
+
+    [Fact]
+    public void PathScope_Logs_alone_with_trailing_slash_lists_under_dir()
+    {
+        var q = QueryParser.Parse(@"C:\Logs\");
+        Assert.Equal(@"C:\Logs\", q.PathScope);
+        Assert.Empty(q.Terms);
+        Assert.True(QueryParser.Matches(q, "Logs", @"C:\Logs", ""));
+        Assert.True(QueryParser.Matches(q, "a.txt", @"C:\Logs\a.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "a.txt", @"C:\Other\a.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathScope_normal_name_under_scoped_path_with_trailing_slash()
+    {
+        var q = QueryParser.Parse(@"C:\Logs\ report");
+        Assert.Equal(@"C:\Logs\", q.PathScope);
+        Assert.Contains("report", q.Terms);
+        Assert.True(QueryParser.Matches(q, "report.txt", @"C:\Logs\report.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "report.txt", @"C:\Other\report.txt", "txt"));
+    }
+
+    [Fact]
+    public void PathScope_does_not_absorb_trailing_spaces_into_segment()
+    {
+        // Guard against regressing to scope="C:\Logs  \"
+        Assert.True(QueryParser.TryExtractPathScope(@"C:\Logs  \72", out var scope, out _));
+        Assert.Equal(@"C:\Logs\", scope);
+        Assert.DoesNotContain("  ", scope);
+    }
+
+    [Fact]
+    public void PathTerm_backslash72_alone_still_global_segment_prefix()
+    {
+        var q = QueryParser.Parse(@"\72");
+        Assert.Null(q.PathScope);
+        Assert.Contains(@"\72", q.Terms);
+        Assert.True(QueryParser.Matches(q, "72folder", @"C:\data\72folder", ""));
+        Assert.False(QueryParser.Matches(q, "x72y.txt", @"C:\data\x72y.txt", "txt"));
+    }
+
 }

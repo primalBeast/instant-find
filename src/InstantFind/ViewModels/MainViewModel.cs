@@ -499,7 +499,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (string.IsNullOrWhiteSpace(querySnapshot)) return;
 
         var options = BuildSearchOptions();
-        var generation = Interlocked.Increment(ref _searchGeneration);
+        // Do not bump generation: that would orphan in-flight user searches and leave the spinner on.
+        var generation = Volatile.Read(ref _searchGeneration);
 
         IReadOnlyList<FileEntry> hits;
         bool invalidRegex = false;

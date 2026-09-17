@@ -376,6 +376,7 @@ public sealed class IndexDatabase : IDisposable
             return SearchWithLike(query, maxResults, includeDirectories, options);
 
         using var cmd = Conn().CreateCommand();
+        cmd.CommandTimeout = 60; // always finish; never hang the UI spinner forever
         var sql = new System.Text.StringBuilder();
         sql.Append("""
             SELECT f.id, f.name, f.path, f.directory, f.extension, f.size, f.modified_utc, f.is_directory
@@ -453,6 +454,7 @@ public sealed class IndexDatabase : IDisposable
     {
         var results = new List<FileEntry>();
         using var cmd = Conn().CreateCommand();
+        cmd.CommandTimeout = 60; // always finish; never hang the UI spinner forever
         var sql = new System.Text.StringBuilder();
         sql.Append("""
             SELECT id, name, path, directory, extension, size, modified_utc, is_directory

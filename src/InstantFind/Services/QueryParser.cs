@@ -38,12 +38,22 @@ public static class QueryParser
 
     /// <summary>
     /// Leading Windows drive path whose last segment ends with '\'.
-    /// Captures valid path segments only (* ? " &lt; &gt; | excluded) so
-    /// "C:\Projects\*.pdf" → scope=C:\Projects\, rest=*.pdf.
+    /// Segments may contain internal spaces (Program Files) but must not
+    /// end with whitespace before '\' — so "C:\Logs  \72" is not absorbed
+    /// as scope "C:\Logs  \".
     /// </summary>
     private static readonly Regex PathScopeRegex = new(
-        // First char of each segment must be non-whitespace (keeps "C:\Projects\ \72" rest=\72).
-        @"^(?<scope>[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n\s][^\\/:*?""<>|\r\n]*\\)*)(?<rest>.*)$",
+        // Segment = non-ws tokens separated by spaces, then '\' (no trailing ws before '\').
+        @"^(?<scope>[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n\s]+(?:\s+[^\\/:*?""<>|\r\n\s]+)*\\)*)(?<rest>.*)$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>X:\dir</c> + whitespace + path term <c>\rest</c> → scope <c>X:\dir\</c>
+    /// even when the directory has no trailing '\'.
+    /// Example: "C:\Logs  \72" → scope=C:\Logs\, rest=\72.
+    /// </summary>
+    private static readonly Regex ImplicitPathScopeWithPathTermRegex = new(
+        @"^(?<dir>[A-Za-z]:(?:\\[^\\/:*?""<>|\r\n\s]+(?:\s+[^\\/:*?""<>|\r\n\s]+)*)+)(\s+)(?<rest>\\.+)$",
         RegexOptions.Compiled);
 
     public static ParsedQuery Parse(string? input, MatchMode mode = MatchMode.And, bool useRegex = false)
@@ -113,9 +123,12 @@ public static class QueryParser
 
     /// <summary>
     /// Extracts a directory scope when the query starts with a Windows path whose
-    /// scoped prefix ends with '\'. Bradley rule: only scope when that prefix ends with '\'.
+    /// scoped prefix ends with '\'. Bradley rule: only scope when that prefix ends with '\',
+    /// except when a path without trailing '\' is followed by whitespace and an
+    /// Everything-like path term (<c>\72</c>) — then scope the directory and keep the path term.
     /// <c>C:\Projects</c> → no scope (normal FTS term);
     /// <c>C:\Projects\</c> → scope; <c>C:\Projects\foo</c> → scope <c>C:\Projects\</c>, rest <c>foo</c>;
+    /// <c>C:\Logs  \72</c> → scope <c>C:\Logs\</c>, rest <c>\72</c>;
     /// <c>C:\</c> alone → scope OK; <c>C:\*.pdf</c> → scope <c>C:\</c>.
     /// </summary>
     public static bool TryExtractPathScope(string input, out string scope, out string remainder)
@@ -124,6 +137,15 @@ public static class QueryParser
         remainder = input;
         if (string.IsNullOrEmpty(input))
             return false;
+
+        // Prefer: C:\Logs  \72 → scope C:\Logs\ + path term \72 (no trailing \ required on dir).
+        var impl = ImplicitPathScopeWithPathTermRegex.Match(input);
+        if (impl.Success)
+        {
+            scope = impl.Groups["dir"].Value + "\\";
+            remainder = impl.Groups["rest"].Value;
+            return true;
+        }
 
         var m = PathScopeRegex.Match(input);
         if (!m.Success)
