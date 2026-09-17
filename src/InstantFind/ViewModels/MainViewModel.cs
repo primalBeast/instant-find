@@ -32,6 +32,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isAndChecked = true;
     private bool _isOrChecked;
     private bool _syncingMode;
+    private bool _isContextMenuOpen;
+    private bool _silentRefreshPending;
+    private FileEntry? _contextTarget;
 
     public MainViewModel()
     {
@@ -59,17 +62,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _ = RunSearchAsync();
         };
 
-        OpenCommand = new RelayCommand(_ => OpenSelected(), _ => SelectedItem is not null);
-        OpenFolderCommand = new RelayCommand(_ => OpenContainingFolder(), _ => SelectedItem is not null);
+        OpenCommand = new RelayCommand(_ => OpenSelected(), _ => ActionTarget is not null);
+        OpenFolderCommand = new RelayCommand(_ => OpenContainingFolder(), _ => ActionTarget is not null);
         EditWithNotepadPpCommand = new RelayCommand(
             _ => EditWithNotepadPp(),
-            _ => SelectedItem is not null && !SelectedItem.IsDirectory);
+            _ => ActionTarget is not null && !ActionTarget.IsDirectory);
         OpenInCmdCommand = new RelayCommand(
             _ => OpenInCommandPrompt(),
-            _ => SelectedItem is not null);
+            _ => ActionTarget is not null);
         OpenInGitBashCommand = new RelayCommand(
             _ => OpenInGitBash(),
-            _ => SelectedItem is not null);
+            _ => ActionTarget is not null);
         RebuildIndexCommand = new RelayCommand(async _ => await RebuildIndexAsync(), _ => !IsIndexing);
         CancelIndexCommand = new RelayCommand(_ => _indexer.Cancel(), _ => IsIndexing);
         ClearQueryCommand = new RelayCommand(_ => ClearQuery());
@@ -236,6 +239,39 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    /// <summary>
+    /// Row under the pointer when the context menu opens. Commands prefer this over
+    /// SelectedItem so a silent refresh that clears selection cannot grey out the menu.
+    /// </summary>
+    public FileEntry? ContextTarget
+    {
+        get => _contextTarget;
+        set
+        {
+            if (Set(ref _contextTarget, value))
+                CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>True while the results context menu is open — silent refresh is deferred.</summary>
+    public bool IsContextMenuOpen
+    {
+        get => _isContextMenuOpen;
+        set
+        {
+            if (!Set(ref _isContextMenuOpen, value)) return;
+            if (!value && _silentRefreshPending)
+            {
+                _silentRefreshPending = false;
+                if (!IsIndexing && !string.IsNullOrWhiteSpace(Query))
+                    _ = RunSilentRefreshAsync();
+            }
+        }
+    }
+
+    /// <summary>Target for Open / folder / editor / shell commands.</summary>
+    private FileEntry? ActionTarget => ContextTarget ?? SelectedItem;
+
     public ICommand OpenCommand { get; }
     public ICommand OpenFolderCommand { get; }
     public ICommand EditWithNotepadPpCommand { get; }
@@ -329,10 +365,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         // Silent path: never ScheduleSearch (that sets spinner / "Searching…").
         // Watcher already debounce-coalesces (~350ms); re-query off UI thread.
+        // Defer while context menu is open so CanExecute / selection stay stable.
         _dispatcher.BeginInvoke(() =>
         {
             if (IsIndexing) return;
             if (string.IsNullOrWhiteSpace(Query)) return;
+            if (IsContextMenuOpen)
+            {
+                _silentRefreshPending = true;
+                return;
+            }
             _ = RunSilentRefreshAsync();
         });
     }
@@ -437,9 +479,35 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Ignore stale results if a newer search/refresh superseded this one
         if (generation != _searchGeneration) return;
 
+        // No-op when the ordered path set is unchanged — keeps SelectedItem / CanExecute.
+        if (SameOrderedPaths(Results, hits))
+        {
+            IsSearching = false;
+            return;
+        }
+
+        var selectedPath = SelectedItem?.FullPath;
+        var contextPath = ContextTarget?.FullPath;
+
         Results.Clear();
         foreach (var h in hits)
             Results.Add(h);
+
+        // Preserve selection / context target when those paths still exist.
+        if (selectedPath is not null)
+        {
+            SelectedItem = Results.FirstOrDefault(r =>
+                string.Equals(r.FullPath, selectedPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (contextPath is not null)
+        {
+            var stillThere = Results.FirstOrDefault(r =>
+                string.Equals(r.FullPath, contextPath, StringComparison.OrdinalIgnoreCase));
+            if (stillThere is not null)
+                ContextTarget = stillThere;
+            // else keep the captured ContextTarget so an open menu stays usable
+        }
 
         // User path turned the spinner on; silent path never did. Always clear here.
         IsSearching = false;
@@ -457,6 +525,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             StatusText = $"{Results.Count:N0} result(s)";
         }
+    }
+
+    private static bool SameOrderedPaths(IList<FileEntry> current, IReadOnlyList<FileEntry> hits)
+    {
+        if (current.Count != hits.Count) return false;
+        for (var i = 0; i < hits.Count; i++)
+        {
+            if (!string.Equals(current[i].FullPath, hits[i].FullPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
     }
 
     public async Task RebuildIndexAsync()
@@ -497,12 +576,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void OpenSelected()
     {
-        if (SelectedItem is null) return;
+        var target = ActionTarget;
+        if (target is null) return;
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName = SelectedItem.FullPath,
+                FileName = target.FullPath,
                 UseShellExecute = true
             };
             Process.Start(psi);
@@ -515,14 +595,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void OpenContainingFolder()
     {
-        if (SelectedItem is null) return;
+        var target = ActionTarget;
+        if (target is null) return;
         try
         {
-            if (SelectedItem.IsDirectory)
+            if (target.IsDirectory)
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = SelectedItem.FullPath,
+                    FileName = target.FullPath,
                     UseShellExecute = true
                 });
             }
@@ -531,7 +612,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    Arguments = $"/select,\"{SelectedItem.FullPath}\"",
+                    Arguments = $"/select,\"{target.FullPath}\"",
                     UseShellExecute = true
                 });
             }
@@ -544,7 +625,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void EditWithNotepadPp()
     {
-        if (SelectedItem is null || SelectedItem.IsDirectory) return;
+        var target = ActionTarget;
+        if (target is null || target.IsDirectory) return;
 
         var npp = FindNotepadPp();
         if (npp is null)
@@ -562,7 +644,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Process.Start(new ProcessStartInfo
             {
                 FileName = npp,
-                Arguments = $"\"{SelectedItem.FullPath}\"",
+                Arguments = $"\"{target.FullPath}\"",
                 UseShellExecute = false
             });
         }
@@ -579,10 +661,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private string? GetSelectedFolderPath()
     {
-        if (SelectedItem is null) return null;
-        return SelectedItem.IsDirectory
-            ? SelectedItem.FullPath
-            : SelectedItem.Directory;
+        var target = ActionTarget;
+        if (target is null) return null;
+        return target.IsDirectory
+            ? target.FullPath
+            : target.Directory;
     }
 
     public void OpenInCommandPrompt()

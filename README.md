@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.4) | https://github.com/primalBeast/instant-find/releases/download/v1.0.4/InstantFind-win-x64.zip |
+| Direct zip (v1.0.5) | https://github.com/primalBeast/instant-find/releases/download/v1.0.5/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -39,10 +39,11 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.4)
+## Features (v1.0.5)
 
 - Instant as-you-type search after the first index completes
 - **Live results refresh**: when the index updates (create/change/delete/rename via FileSystemWatcher), an active query re-runs automatically (debounced ~350ms) so new files appear within ~1 second — **silently** (no spinner / no “Searching…” flicker; status updates to the final count only)
+- **Stable context menu (v1.0.5)**: silent refresh skips Clear/rebuild when the hit set is unchanged, preserves selection when it changes, and pauses while the context menu is open (plus a right-click `ContextTarget`) so Open / folder / Notepad++ / CMD / Git Bash stay enabled
 - Compact search-bar tools: **Aa** / **W** use MinWidth + padding so glyphs are not clipped; ✕ stays small
 - **Circular busy spinner** in the search bar for **user-initiated** searches only (typing / And-Or / MatchCase / WholeWord / Clear / drive chips) — not for watcher refreshes
 - **And / Or** checkboxes (right of title): default And; both off = literal whitespace (spaces must appear in the name)
@@ -86,8 +87,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.4 && git push origin v1.0.4`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.4`
+1. **Tag** — push a version tag: `git tag v1.0.5 && git push origin v1.0.5`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.5`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

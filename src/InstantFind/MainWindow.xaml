@@ -236,7 +236,8 @@
               RowBackground="{StaticResource BgBrush}"
               AlternatingRowBackground="{StaticResource PanelBrush}"
               HorizontalGridLinesBrush="{StaticResource BorderBrush}"
-              MouseDoubleClick="ResultsGrid_MouseDoubleClick">
+              MouseDoubleClick="ResultsGrid_MouseDoubleClick"
+              PreviewMouseRightButtonDown="ResultsGrid_PreviewMouseRightButtonDown">
       <DataGrid.Resources>
         <Style TargetType="DataGridColumnHeader">
           <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
@@ -263,7 +264,9 @@
         <DataGridTextColumn Header="Date Modified" Binding="{Binding ModifiedDisplay}" Width="140"/>
       </DataGrid.Columns>
       <DataGrid.ContextMenu>
-        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                     Opened="ResultsContextMenu_Opened"
+                     Closed="ResultsContextMenu_Closed">
           <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
           <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
           <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
