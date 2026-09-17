@@ -1,4 +1,5 @@
 using System.Data;
+using System.IO;
 using InstantFind.Models;
 using Microsoft.Data.Sqlite;
 
@@ -9,12 +10,17 @@ namespace InstantFind.Services;
 /// </summary>
 public sealed class IndexDatabase : IDisposable
 {
+    public const string RebuildFileName = "index-rebuild.db";
+
     private readonly string _connectionString;
     private readonly object _writeLock = new();
     private SqliteConnection? _connection;
 
+    public string DatabasePath { get; }
+
     public IndexDatabase(string databasePath)
     {
+        DatabasePath = databasePath;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
@@ -23,8 +29,29 @@ public sealed class IndexDatabase : IDisposable
         }.ToString();
     }
 
+    /// <summary>Path of the side-by-side rebuild temp DB (e.g. index-rebuild.db).</summary>
+    public static string GetRebuildPath(string liveDatabasePath)
+    {
+        var dir = Path.GetDirectoryName(liveDatabasePath)
+                  ?? throw new ArgumentException("Invalid database path.", nameof(liveDatabasePath));
+        return Path.Combine(dir, RebuildFileName);
+    }
+
+    /// <summary>
+    /// On startup: discard leftover rebuild artifacts from a crash mid-rebuild.
+    /// Keeps the previous live index intact.
+    /// </summary>
+    public static void DiscardStaleRebuildArtifacts(string liveDatabasePath)
+    {
+        var rebuild = GetRebuildPath(liveDatabasePath);
+        TryDeleteSqliteFiles(rebuild);
+    }
+
     public void Open()
     {
+        if (_connection is not null)
+            return;
+
         _connection = new SqliteConnection(_connectionString);
         _connection.Open();
         using var cmd = _connection.CreateCommand();
@@ -73,6 +100,46 @@ public sealed class IndexDatabase : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Close the SQLite connection without disposing the IndexDatabase wrapper.</summary>
+    public void Close()
+    {
+        lock (_writeLock)
+        {
+            _connection?.Dispose();
+            _connection = null;
+        }
+    }
+
+    /// <summary>
+    /// Atomically replace the live DB file with a successful rebuild DB.
+    /// Caller must Close() this instance first; call Open() after.
+    /// </summary>
+    public void ReplaceWithRebuildFile(string rebuildDatabasePath)
+    {
+        if (string.Equals(rebuildDatabasePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Rebuild path must differ from live database path.");
+
+        // Drop WAL/SHM sidecars so the main file is consistent before swap.
+        TryDeleteSidecars(DatabasePath);
+        TryDeleteSidecars(rebuildDatabasePath);
+
+        var dir = Path.GetDirectoryName(DatabasePath)!;
+        var backup = Path.Combine(dir, "index.db.bak");
+        TryDeleteSqliteFiles(backup);
+
+        if (File.Exists(DatabasePath))
+        {
+            File.Replace(rebuildDatabasePath, DatabasePath, backup, ignoreMetadataErrors: true);
+            TryDeleteSqliteFiles(backup);
+        }
+        else
+        {
+            File.Move(rebuildDatabasePath, DatabasePath);
+        }
+
+        TryDeleteSqliteFiles(rebuildDatabasePath);
+    }
+
     public void ClearAll()
     {
         lock (_writeLock)
@@ -90,11 +157,12 @@ public sealed class IndexDatabase : IDisposable
         return (long)(cmd.ExecuteScalar() ?? 0L);
     }
 
-    public void UpsertBatch(IReadOnlyList<FileEntry> entries)
+    public void UpsertBatch(IReadOnlyList<FileEntry> entries, CancellationToken ct = default)
     {
         if (entries.Count == 0) return;
         lock (_writeLock)
         {
+            ct.ThrowIfCancellationRequested();
             using var tx = Conn().BeginTransaction();
             using var cmd = Conn().CreateCommand();
             cmd.Transaction = tx;
@@ -117,8 +185,13 @@ public sealed class IndexDatabase : IDisposable
             var pMod = cmd.Parameters.Add("$modified", SqliteType.Text);
             var pIsDir = cmd.Parameters.Add("$isDir", SqliteType.Integer);
 
-            foreach (var e in entries)
+            for (int i = 0; i < entries.Count; i++)
             {
+                // Check often so Cancel does not sit behind a large batch.
+                if ((i & 31) == 0)
+                    ct.ThrowIfCancellationRequested();
+
+                var e = entries[i];
                 pName.Value = e.Name;
                 pPath.Value = e.Path;
                 pDir.Value = e.Directory;
@@ -129,6 +202,7 @@ public sealed class IndexDatabase : IDisposable
                 cmd.ExecuteNonQuery();
             }
 
+            ct.ThrowIfCancellationRequested();
             tx.Commit();
         }
     }
@@ -144,19 +218,141 @@ public sealed class IndexDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Delete the folder itself, all descendant paths, and any rows whose
+    /// <c>directory</c> equals the folder or is under it.
+    /// </summary>
     public void DeleteUnderDirectory(string directoryPrefix)
     {
         lock (_writeLock)
         {
-            var prefix = directoryPrefix.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+            var patterns = IndexPathHelpers.BuildDeletePatterns(directoryPrefix);
             using var cmd = Conn().CreateCommand();
-            cmd.CommandText = "DELETE FROM files WHERE path = $exact OR path LIKE $like ESCAPE '\\';";
-            cmd.Parameters.AddWithValue("$exact", prefix);
-            // Escape LIKE wildcards in path
-            var like = EscapeLike(prefix) + System.IO.Path.DirectorySeparatorChar + "%";
-            cmd.Parameters.AddWithValue("$like", like);
+            cmd.CommandText = """
+                DELETE FROM files WHERE
+                    path = $exact
+                    OR path LIKE $pathLike ESCAPE '\'
+                    OR directory = $exact
+                    OR directory LIKE $dirLike ESCAPE '\';
+                """;
+            cmd.Parameters.AddWithValue("$exact", patterns.Exact);
+            cmd.Parameters.AddWithValue("$pathLike", patterns.PathLike);
+            cmd.Parameters.AddWithValue("$dirLike", patterns.DirectoryLike);
             cmd.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// Batched prune: remove indexed paths under <paramref name="prefix"/> that no longer
+    /// exist on disk. Returns number of rows deleted.
+    /// </summary>
+    public int PruneMissing(string? prefix = null, int batchSize = 500, CancellationToken ct = default)
+    {
+        var deleted = 0;
+        var normalized = string.IsNullOrWhiteSpace(prefix)
+            ? null
+            : IndexPathHelpers.NormalizePrefix(prefix);
+
+        long lastId = 0;
+        while (!ct.IsCancellationRequested)
+        {
+            var batch = new List<(long Id, string Path)>(batchSize);
+            lock (_writeLock)
+            {
+                using var cmd = Conn().CreateCommand();
+                if (normalized is null)
+                {
+                    cmd.CommandText = """
+                        SELECT id, path FROM files
+                        WHERE id > $last
+                        ORDER BY id
+                        LIMIT $limit;
+                        """;
+                }
+                else
+                {
+                    var patterns = IndexPathHelpers.BuildDeletePatterns(normalized);
+                    cmd.CommandText = """
+                        SELECT id, path FROM files
+                        WHERE id > $last
+                          AND (path = $exact OR path LIKE $pathLike ESCAPE '\'
+                               OR directory = $exact OR directory LIKE $dirLike ESCAPE '\')
+                        ORDER BY id
+                        LIMIT $limit;
+                        """;
+                    cmd.Parameters.AddWithValue("$exact", patterns.Exact);
+                    cmd.Parameters.AddWithValue("$pathLike", patterns.PathLike);
+                    cmd.Parameters.AddWithValue("$dirLike", patterns.DirectoryLike);
+                }
+                cmd.Parameters.AddWithValue("$last", lastId);
+                cmd.Parameters.AddWithValue("$limit", batchSize);
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                    batch.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+
+            if (batch.Count == 0)
+                break;
+
+            var missingIds = new List<long>();
+            foreach (var (id, path) in batch)
+            {
+                lastId = id;
+                try
+                {
+                    if (!File.Exists(path) && !Directory.Exists(path))
+                        missingIds.Add(id);
+                }
+                catch
+                {
+                    // If we cannot probe, leave the row
+                }
+            }
+
+            if (missingIds.Count > 0)
+            {
+                lock (_writeLock)
+                {
+                    using var tx = Conn().BeginTransaction();
+                    using var cmd = Conn().CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = "DELETE FROM files WHERE id = $id;";
+                    var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
+                    foreach (var id in missingIds)
+                    {
+                        pId.Value = id;
+                        cmd.ExecuteNonQuery();
+                    }
+                    tx.Commit();
+                }
+                deleted += missingIds.Count;
+            }
+        }
+
+        return deleted;
+    }
+
+    /// <summary>Delete specific paths if they no longer exist; returns deleted paths.</summary>
+    public IReadOnlyList<string> PruneMissingPaths(IEnumerable<string> paths)
+    {
+        var removed = new List<string>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (File.Exists(path) || Directory.Exists(path))
+                    continue;
+            }
+            catch
+            {
+                continue;
+            }
+
+            DeleteByPath(path);
+            removed.Add(path);
+        }
+        return removed;
     }
 
     public IReadOnlyList<FileEntry> Search(ParsedQuery query, int maxResults, bool includeDirectories, SearchOptions? options = null)
@@ -471,12 +667,30 @@ public sealed class IndexDatabase : IDisposable
         };
     }
 
-    private static string EscapeLike(string value)
+    private static void TryDeleteSqliteFiles(string dbPath)
     {
-        return value
-            .Replace("\\", "\\\\")
-            .Replace("%", "\\%")
-            .Replace("_", "\\_");
+        TryDelete(dbPath);
+        TryDeleteSidecars(dbPath);
+    }
+
+    private static void TryDeleteSidecars(string dbPath)
+    {
+        TryDelete(dbPath + "-wal");
+        TryDelete(dbPath + "-shm");
+        TryDelete(dbPath + "-journal");
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // Best-effort cleanup
+        }
     }
 
     private SqliteConnection Conn() =>
@@ -484,7 +698,6 @@ public sealed class IndexDatabase : IDisposable
 
     public void Dispose()
     {
-        _connection?.Dispose();
-        _connection = null;
+        Close();
     }
 }

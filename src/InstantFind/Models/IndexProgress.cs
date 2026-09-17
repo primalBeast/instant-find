@@ -8,7 +8,20 @@ public sealed class IndexProgress
     public bool IsComplete { get; init; }
     public string? Error { get; init; }
 
-    public string StatusText => IsComplete
-        ? $"Indexed {FilesIndexed:N0} items"
-        : $"Indexing… {FilesIndexed:N0} items — {CurrentPath}";
+    /// <summary>Optional override (e.g. "Preparing rebuild…").</summary>
+    public string? Message { get; init; }
+
+    public string StatusText
+    {
+        get
+        {
+            if (Message is not null)
+                return Message;
+            if (IsComplete)
+                return $"Indexed {FilesIndexed:N0} items";
+            if (string.IsNullOrEmpty(CurrentPath))
+                return $"Scanning… {FilesIndexed:N0} items";
+            return $"Scanning… {FilesIndexed:N0} items — {CurrentPath}";
+        }
+    }
 }

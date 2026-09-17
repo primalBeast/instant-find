@@ -13,7 +13,10 @@ public sealed class FileWatcherService : IDisposable
     private readonly object _gate = new();
     private readonly object _debounceGate = new();
     private Timer? _debounceTimer;
+    private int _pruneScheduled;
     private const int DebounceMs = 350;
+    // FileSystemWatcher max InternalBufferSize is 64 KiB on Windows.
+    private const int WatcherBufferSize = 64 * 1024;
 
     /// <summary>
     /// Raised (debounced) after a successful create/change/delete/rename index update.
@@ -42,13 +45,13 @@ public sealed class FileWatcherService : IDisposable
                                    | NotifyFilters.DirectoryName
                                    | NotifyFilters.LastWrite
                                    | NotifyFilters.Size,
-                    InternalBufferSize = 64 * 1024
+                    InternalBufferSize = WatcherBufferSize
                 };
                 watcher.Created += OnCreated;
                 watcher.Changed += OnChanged;
                 watcher.Deleted += OnDeleted;
                 watcher.Renamed += OnRenamed;
-                watcher.Error += (_, _) => { /* buffer overflow — next full reindex recovers */ };
+                watcher.Error += OnWatcherError;
                 watcher.EnableRaisingEvents = true;
                 lock (_gate) { _watchers.Add(watcher); }
             }
@@ -102,9 +105,13 @@ public sealed class FileWatcherService : IDisposable
         Safe(() =>
         {
             _db.DeleteByPath(e.FullPath);
-            // If a directory was removed, also drop children
+            // Folder delete: drop children by path AND by directory column
             _db.DeleteUnderDirectory(e.FullPath);
             ScheduleIndexMutated();
+            // Light prune under parent in case watcher only fired for the top folder
+            var parent = Path.GetDirectoryName(e.FullPath);
+            if (!string.IsNullOrEmpty(parent))
+                SchedulePrune(parent);
         });
     }
 
@@ -117,6 +124,15 @@ public sealed class FileWatcherService : IDisposable
             _indexer.IndexSinglePath(e.FullPath);
             ScheduleIndexMutated();
         });
+    }
+
+    private void OnWatcherError(object sender, ErrorEventArgs e)
+    {
+        // Buffer overflow / dropped events — schedule a background prune for that root.
+        var root = (sender as FileSystemWatcher)?.Path;
+        if (string.IsNullOrEmpty(root))
+            root = null;
+        SchedulePrune(root);
     }
 
     /// <summary>
@@ -137,6 +153,35 @@ public sealed class FileWatcherService : IDisposable
                 DebounceMs,
                 Timeout.Infinite);
         }
+    }
+
+    /// <summary>
+    /// Background prune for a root (or entire index if null). Debounced / single-flight.
+    /// </summary>
+    public void SchedulePrune(string? prefix)
+    {
+        // Only one prune at a time
+        if (Interlocked.CompareExchange(ref _pruneScheduled, 1, 0) != 0)
+            return;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                // Small delay to coalesce overflow bursts
+                Thread.Sleep(400);
+                _db.PruneMissing(prefix);
+                ScheduleIndexMutated();
+            }
+            catch
+            {
+                // never crash from prune
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _pruneScheduled, 0);
+            }
+        });
     }
 
     private static void Safe(Action action)

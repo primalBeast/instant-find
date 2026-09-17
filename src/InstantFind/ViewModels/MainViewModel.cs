@@ -42,6 +42,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _dispatcher = Dispatcher.CurrentDispatcher;
         _settingsService = new SettingsService();
         _settings = _settingsService.Load();
+        // Crash mid-rebuild left index-rebuild.db — discard and keep previous live index
+        IndexDatabase.DiscardStaleRebuildArtifacts(_settingsService.DatabasePath);
         _db = new IndexDatabase(_settingsService.DatabasePath);
         _db.Open();
         _indexer = new FileIndexer(_db, _settings);
@@ -507,6 +509,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 var r = _search.Search(querySnapshot, options, out var inv);
                 invalidRegex = inv;
+                // Drop search hits that no longer exist (watcher may have missed deletes)
+                var missing = _db.PruneMissingPaths(r.Select(x => x.FullPath));
+                if (missing.Count > 0)
+                {
+                    var gone = new HashSet<string>(missing, StringComparer.OrdinalIgnoreCase);
+                    r = r.Where(x => !gone.Contains(x.FullPath)).ToList();
+                }
                 return r;
             }).ConfigureAwait(false);
         }
@@ -642,7 +651,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (IsIndexing) return;
         IsIndexing = true;
-        StatusText = "Starting index…";
+        StatusText = "Preparing rebuild…";
         _watcher.Stop();
 
         var progress = new Progress<IndexProgress>(p =>
@@ -654,12 +663,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (p.Error is not null)
                     StatusText = p.Error;
                 else
-                {
                     StatusText = $"Indexed {p.FilesIndexed:N0} items";
-                    // Watchers remain on IndexedRoots (not per enabled chip)
-                    _watcher.Start(_settings.IndexedRoots);
+
+                // Always restart watchers — including cancel (previous index kept)
+                _watcher.Start(_settings.IndexedRoots);
+
+                if (p.Error is null)
                     _ = RunSearchAsync();
-                }
+                else if (!string.IsNullOrWhiteSpace(Query))
+                    _ = RunSilentRefreshAsync();
             }
         });
 
@@ -671,6 +683,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             IsIndexing = false;
             StatusText = "Index failed: " + ex.Message;
+            _watcher.Start(_settings.IndexedRoots);
         }
     }
 

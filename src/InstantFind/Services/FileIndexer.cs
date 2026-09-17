@@ -8,6 +8,8 @@ namespace InstantFind.Services;
 /// <summary>
 /// User-mode parallel indexer using Directory.EnumerateFileSystemEntries.
 /// Skips inaccessible directories. No drivers, no MFT/USN.
+/// Full rebuilds write to a temporary DB and atomically swap on success so
+/// cancel/crash never leaves a tiny partial live index.
 /// </summary>
 public sealed class FileIndexer
 {
@@ -26,17 +28,30 @@ public sealed class FileIndexer
     public async Task RunFullIndexAsync(IProgress<IndexProgress>? progress, CancellationToken externalToken = default)
     {
         _cts?.Cancel();
+        try { _cts?.Dispose(); } catch { /* prior CTS may already be disposed */ }
         _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         var ct = _cts.Token;
         IsRunning = true;
 
         try
         {
-            await Task.Run(() => IndexCore(progress, ct), ct).ConfigureAwait(false);
+            await Task.Run(() => IndexCore(progress, ct), CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            progress?.Report(new IndexProgress { IsComplete = true, Error = "Indexing cancelled." });
+            progress?.Report(new IndexProgress
+            {
+                IsComplete = true,
+                Error = "Indexing cancelled — previous index kept."
+            });
+        }
+        catch (Exception ex)
+        {
+            progress?.Report(new IndexProgress
+            {
+                IsComplete = true,
+                Error = "Index failed: " + ex.Message
+            });
         }
         finally
         {
@@ -44,88 +59,197 @@ public sealed class FileIndexer
         }
     }
 
-    public void Cancel() => _cts?.Cancel();
+    public void Cancel()
+    {
+        try { _cts?.Cancel(); }
+        catch (ObjectDisposedException) { /* ignore */ }
+    }
 
     private void IndexCore(IProgress<IndexProgress>? progress, CancellationToken ct)
     {
-        _db.ClearAll();
+        progress?.Report(new IndexProgress { Message = "Preparing rebuild…" });
 
-        long filesIndexed = 0;
-        long dirsScanned = 0;
-        var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
-        // Rebuild Index uses enabled drives only (chips). No new per-drive watchers.
-        var roots = _settings.IndexedRoots
-            .Where(Directory.Exists)
-            .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? new List<string>()))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var livePath = _db.DatabasePath;
+        var rebuildPath = IndexDatabase.GetRebuildPath(livePath);
 
-        var pending = new ConcurrentQueue<string>();
-        foreach (var root in roots)
-            pending.Enqueue(root);
+        // Fresh temp DB for this rebuild (discard any leftover)
+        IndexDatabase.DiscardStaleRebuildArtifacts(livePath);
+        IndexDatabase? rebuildDb = null;
+        var swapSucceeded = false;
 
-        var workers = Math.Clamp(Environment.ProcessorCount, 2, 8);
-        using var done = new CountdownEvent(1);
-        var activeWorkers = 0;
-
-        void Worker()
+        try
         {
-            var localBatch = new List<FileEntry>(256);
-            try
+            ct.ThrowIfCancellationRequested();
+
+            rebuildDb = new IndexDatabase(rebuildPath);
+            rebuildDb.Open();
+
+            progress?.Report(new IndexProgress
             {
-                while (!ct.IsCancellationRequested)
+                Message = "Scanning… 0 items",
+                CurrentPath = string.Empty,
+                FilesIndexed = 0
+            });
+
+            long filesIndexed = 0;
+            long dirsScanned = 0;
+            var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+            var roots = _settings.IndexedRoots
+                .Where(Directory.Exists)
+                .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? new List<string>()))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var pending = new ConcurrentQueue<string>();
+            foreach (var root in roots)
+                pending.Enqueue(root);
+
+            var workers = Math.Clamp(Environment.ProcessorCount, 2, 8);
+            using var done = new CountdownEvent(1);
+            var activeWorkers = 0;
+            Exception? workerFault = null;
+
+            void Worker()
+            {
+                var localBatch = new List<FileEntry>(256);
+                try
                 {
-                    if (!pending.TryDequeue(out var dir))
+                    while (!ct.IsCancellationRequested)
                     {
-                        // Exit when no work remains and no worker is producing more
-                        if (Volatile.Read(ref activeWorkers) == 0 && pending.IsEmpty)
-                            break;
-                        Thread.Sleep(10);
-                        continue;
-                    }
-
-                    Interlocked.Increment(ref activeWorkers);
-                    try
-                    {
-                        Interlocked.Increment(ref dirsScanned);
-                        EnumerateDirectory(dir, exclude, pending, localBatch, ref filesIndexed, progress, ct);
-
-                        if (localBatch.Count >= 200)
+                        if (!pending.TryDequeue(out var dir))
                         {
-                            _db.UpsertBatch(localBatch);
+                            if (Volatile.Read(ref activeWorkers) == 0 && pending.IsEmpty)
+                                break;
+                            Thread.Sleep(5);
+                            continue;
+                        }
+
+                        Interlocked.Increment(ref activeWorkers);
+                        try
+                        {
+                            Interlocked.Increment(ref dirsScanned);
+                            EnumerateDirectory(dir, exclude, pending, localBatch, ref filesIndexed, progress, ct, rebuildDb);
+
+                            if (localBatch.Count >= 200)
+                            {
+                                rebuildDb.UpsertBatch(localBatch, ct);
+                                localBatch.Clear();
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
                             localBatch.Clear();
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            Interlocked.CompareExchange(ref workerFault, ex, null);
+                            break;
+                        }
+                        finally
+                        {
+                            Interlocked.Decrement(ref activeWorkers);
                         }
                     }
-                    finally
+
+                    if (localBatch.Count > 0 && !ct.IsCancellationRequested)
                     {
-                        Interlocked.Decrement(ref activeWorkers);
+                        try { rebuildDb.UpsertBatch(localBatch, ct); }
+                        catch (OperationCanceledException) { /* discard partial batch */ }
                     }
                 }
+                finally
+                {
+                    try { done.Signal(); }
+                    catch (ObjectDisposedException) { }
+                }
+            }
 
-                if (localBatch.Count > 0)
-                    _db.UpsertBatch(localBatch);
+            for (int w = 0; w < workers; w++)
+            {
+                done.AddCount();
+                ThreadPool.QueueUserWorkItem(_ => Worker());
+            }
+
+            done.Signal(); // remove initial count
+
+            // Cooperative wait: on cancel, wait briefly for workers without crashing
+            try
+            {
+                done.Wait(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                done.Wait(TimeSpan.FromSeconds(15));
+                throw;
+            }
+
+            if (workerFault is not null)
+                throw workerFault;
+
+            ct.ThrowIfCancellationRequested();
+
+            // Flush complete — atomically swap rebuild → live
+            progress?.Report(new IndexProgress
+            {
+                Message = "Finalizing index…",
+                FilesIndexed = Interlocked.Read(ref filesIndexed)
+            });
+
+            var finalCount = Interlocked.Read(ref filesIndexed);
+            rebuildDb.Close();
+            rebuildDb.Dispose();
+            rebuildDb = null;
+
+            _db.Close();
+            try
+            {
+                _db.ReplaceWithRebuildFile(rebuildPath);
+                swapSucceeded = true;
             }
             finally
             {
-                done.Signal();
+                // Always reopen live DB so search/watchers keep working
+                try { _db.Open(); }
+                catch
+                {
+                    // Last resort: recreate empty schema
+                    try { _db.Open(); } catch { }
+                }
             }
+
+            progress?.Report(new IndexProgress
+            {
+                FilesIndexed = finalCount,
+                DirectoriesScanned = Interlocked.Read(ref dirsScanned),
+                IsComplete = true
+            });
         }
-
-        for (int w = 0; w < workers; w++)
+        catch (OperationCanceledException)
         {
-            done.AddCount();
-            ThreadPool.QueueUserWorkItem(_ => Worker());
+            CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
+            throw;
         }
-
-        done.Signal(); // remove initial count
-        done.Wait(ct);
-
-        progress?.Report(new IndexProgress
+        catch
         {
-            FilesIndexed = Interlocked.Read(ref filesIndexed),
-            DirectoriesScanned = Interlocked.Read(ref dirsScanned),
-            IsComplete = true
-        });
+            CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
+            // Ensure live DB is open for continued use
+            try
+            {
+                if (!swapSucceeded)
+                    _db.Open();
+            }
+            catch { }
+            throw;
+        }
+    }
+
+    private static void CleanupFailedRebuild(IndexDatabase? rebuildDb, string livePath, bool swapSucceeded)
+    {
+        if (swapSucceeded) return;
+        try { rebuildDb?.Close(); } catch { }
+        try { rebuildDb?.Dispose(); } catch { }
+        IndexDatabase.DiscardStaleRebuildArtifacts(livePath);
     }
 
     private void EnumerateDirectory(
@@ -135,7 +259,8 @@ public sealed class FileIndexer
         List<FileEntry> localBatch,
         ref long filesIndexed,
         IProgress<IndexProgress>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        IndexDatabase targetDb)
     {
         IEnumerable<string> entries;
         try
@@ -196,12 +321,19 @@ public sealed class FileIndexer
                 }
             }
         }
+
+        // Flush mid-directory if batch is large so cancel isn't blocked long
+        if (localBatch.Count >= 200)
+        {
+            targetDb.UpsertBatch(localBatch, ct);
+            localBatch.Clear();
+        }
     }
 
     private static void Report(ref long filesIndexed, string dir, IProgress<IndexProgress>? progress)
     {
         var count = Interlocked.Increment(ref filesIndexed);
-        if (count % 500 == 0)
+        if (count == 1 || count % 500 == 0)
         {
             progress?.Report(new IndexProgress
             {
