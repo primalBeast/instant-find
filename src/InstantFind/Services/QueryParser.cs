@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using InstantFind.Models;
 
 namespace InstantFind.Services;
 
@@ -12,6 +13,7 @@ public sealed class ParsedQuery
     public List<string> Extensions { get; } = new();
     public bool HasWildcards { get; set; }
     public string Raw { get; init; } = string.Empty;
+    public MatchMode Mode { get; init; } = MatchMode.And;
 }
 
 public static class QueryParser
@@ -20,9 +22,9 @@ public static class QueryParser
         @"ext:(?<ext>[A-Za-z0-9_+-]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public static ParsedQuery Parse(string? input)
+    public static ParsedQuery Parse(string? input, MatchMode mode = MatchMode.And)
     {
-        var result = new ParsedQuery { Raw = input ?? string.Empty };
+        var result = new ParsedQuery { Raw = input ?? string.Empty, Mode = mode };
         if (string.IsNullOrWhiteSpace(input))
             return result;
 
@@ -36,6 +38,18 @@ public static class QueryParser
         }
 
         working = ExtFilter.Replace(working, " ").Trim();
+
+        if (mode == MatchMode.LiteralWhitespace)
+        {
+            // Do not split on spaces — the whole remainder is one term (spaces must appear in the name).
+            if (!string.IsNullOrEmpty(working))
+            {
+                if (working.Contains('*') || working.Contains('?'))
+                    result.HasWildcards = true;
+                result.Terms.Add(working);
+            }
+            return result;
+        }
 
         foreach (var token in Tokenize(working))
         {
@@ -52,7 +66,13 @@ public static class QueryParser
     /// <summary>
     /// Returns true if the filename/path matches the parsed query (in-memory matching for tests / fallback).
     /// </summary>
-    public static bool Matches(ParsedQuery query, string name, string fullPath, string extension)
+    public static bool Matches(
+        ParsedQuery query,
+        string name,
+        string fullPath,
+        string extension,
+        bool matchCase = false,
+        bool wholeWord = false)
     {
         if (query.Extensions.Count > 0)
         {
@@ -64,10 +84,22 @@ public static class QueryParser
         if (query.Terms.Count == 0)
             return query.Extensions.Count > 0 || string.IsNullOrWhiteSpace(query.Raw);
 
-        var haystack = fullPath;
+        var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+        if (query.Mode == MatchMode.Or)
+        {
+            foreach (var term in query.Terms)
+            {
+                if (TermMatches(term, name, fullPath, comparison, wholeWord))
+                    return true;
+            }
+            return false;
+        }
+
+        // And and LiteralWhitespace: every term must match
         foreach (var term in query.Terms)
         {
-            if (!TermMatches(term, name, haystack))
+            if (!TermMatches(term, name, fullPath, comparison, wholeWord))
                 return false;
         }
 
@@ -75,16 +107,27 @@ public static class QueryParser
     }
 
     public static bool TermMatches(string term, string name, string fullPath)
+        => TermMatches(term, name, fullPath, StringComparison.OrdinalIgnoreCase, wholeWord: false);
+
+    public static bool TermMatches(
+        string term,
+        string name,
+        string fullPath,
+        StringComparison comparison,
+        bool wholeWord)
     {
         if (term.Contains('*') || term.Contains('?'))
         {
+            var options = comparison == StringComparison.Ordinal
+                ? RegexOptions.CultureInvariant
+                : RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
             var pattern = "^" + Regex.Escape(term)
                 .Replace("\\*", ".*")
                 .Replace("\\?", ".") + "$";
             // Shell wildcards apply to the filename — do not let D*.pdf match via a folder like \\docs\\
-            if (Regex.IsMatch(name, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            if (Regex.IsMatch(name, pattern, options))
                 return true;
-            if (Regex.IsMatch(System.IO.Path.GetFileName(fullPath), pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            if (Regex.IsMatch(System.IO.Path.GetFileName(fullPath), pattern, options))
                 return true;
             // Path patterns only when the term itself contains a path separator
             if (term.Contains('\\') || term.Contains('/'))
@@ -92,13 +135,35 @@ public static class QueryParser
                 var pathPattern = Regex.Escape(term)
                     .Replace("\\*", ".*")
                     .Replace("\\?", ".");
-                return Regex.IsMatch(fullPath, pathPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                return Regex.IsMatch(fullPath, pathPattern, options);
             }
             return false;
         }
 
-        return fullPath.Contains(term, StringComparison.OrdinalIgnoreCase)
-               || name.Contains(term, StringComparison.OrdinalIgnoreCase);
+        if (wholeWord)
+            return WholeWordMatches(term, name, fullPath, comparison);
+
+        return fullPath.Contains(term, comparison)
+               || name.Contains(term, comparison);
+    }
+
+    private static bool WholeWordMatches(string term, string name, string fullPath, StringComparison comparison)
+    {
+        if (string.Equals(name, term, comparison))
+            return true;
+
+        var fileName = System.IO.Path.GetFileName(fullPath);
+        if (string.Equals(fileName, term, comparison))
+            return true;
+
+        // Path segment equality (e.g. term "docs" matches C:\docs\file.txt)
+        foreach (var segment in fullPath.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (string.Equals(segment, term, comparison))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -154,6 +219,7 @@ public static class QueryParser
     /// <summary>
     /// Builds an FTS5 MATCH expression for plain (non-wildcard) substring terms only.
     /// Returns null when the query has wildcards or no usable terms — callers should use LIKE instead.
+    /// Match Case / Whole Word must leave FTS (caller responsibility).
     /// </summary>
     public static string? BuildFtsMatch(ParsedQuery query)
     {
@@ -172,7 +238,11 @@ public static class QueryParser
             parts.Add(EscapeFtsToken(term) + "*");
         }
 
-        return parts.Count == 0 ? null : string.Join(" AND ", parts);
+        if (parts.Count == 0)
+            return null;
+
+        var joiner = query.Mode == MatchMode.Or ? " OR " : " AND ";
+        return string.Join(joiner, parts);
     }
 
     private static string EscapeFtsToken(string token)

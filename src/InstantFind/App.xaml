@@ -10,5 +10,17 @@
     <SolidColorBrush x:Key="MutedBrush" Color="#9D9D9D"/>
     <SolidColorBrush x:Key="AccentBrush" Color="#0E639C"/>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    <Style TargetType="ToggleButton">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+      <Setter Property="Foreground" Value="{StaticResource FgBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+      <Setter Property="Padding" Value="6,2"/>
+      <Style.Triggers>
+        <Trigger Property="IsChecked" Value="True">
+          <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+          <Setter Property="Foreground" Value="White"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
   </Application.Resources>
 </Application>

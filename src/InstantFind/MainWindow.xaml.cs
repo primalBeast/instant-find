@@ -13,6 +13,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         _vm = new MainViewModel();
         DataContext = _vm;
+        _vm.FocusSearchRequested += () =>
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+        };
         Closed += (_, _) => _vm.Dispose();
         Loaded += (_, _) => SearchBox.Focus();
     }

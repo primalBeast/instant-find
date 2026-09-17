@@ -158,11 +158,18 @@ public sealed class IndexDatabase : IDisposable
         }
     }
 
-    public IReadOnlyList<FileEntry> Search(ParsedQuery query, int maxResults, bool includeDirectories)
+    public IReadOnlyList<FileEntry> Search(ParsedQuery query, int maxResults, bool includeDirectories, SearchOptions? options = null)
     {
-        // Wildcard queries must use SQL LIKE — FTS strip-wildcard cannot find D*.pdf → Document.pdf
-        if (query.HasWildcards)
-            return SearchWithLike(query, maxResults, includeDirectories);
+        options ??= new SearchOptions { MatchMode = query.Mode };
+
+        // No enabled drives → nothing visible
+        if (options.EnabledDrivePrefixes.Count == 0)
+            return Array.Empty<FileEntry>();
+
+        // Match Case or Whole Word → leave FTS; use LIKE / = with LIMIT
+        bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards;
+        if (leaveFts)
+            return SearchWithLike(query, maxResults, includeDirectories, options);
 
         var results = new List<FileEntry>();
         var fts = QueryParser.BuildFtsMatch(query);
@@ -197,6 +204,8 @@ public sealed class IndexDatabase : IDisposable
         if (!includeDirectories)
             where.Add("f.is_directory = 0");
 
+        AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "f.");
+
         // Empty query with only ext: or completely empty — allow browsing limited set
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
             return results;
@@ -216,7 +225,7 @@ public sealed class IndexDatabase : IDisposable
                 var entry = ReadEntry(reader);
                 if (query.Terms.Count > 0)
                 {
-                    if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension))
+                    if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
                         continue;
                 }
 
@@ -228,17 +237,21 @@ public sealed class IndexDatabase : IDisposable
         catch (SqliteException)
         {
             // Bad FTS syntax — fall back to LIKE search
-            return SearchWithLike(query, maxResults, includeDirectories);
+            return SearchWithLike(query, maxResults, includeDirectories, options);
         }
 
         return results;
     }
 
     /// <summary>
-    /// Primary path for wildcard queries (* ?): SQL LIKE on name/path.
+    /// Primary path for wildcard / Match Case / Whole Word queries: SQL LIKE or = on name/path.
     /// Also used as FTS failure fallback for plain terms.
     /// </summary>
-    private IReadOnlyList<FileEntry> SearchWithLike(ParsedQuery query, int maxResults, bool includeDirectories)
+    private IReadOnlyList<FileEntry> SearchWithLike(
+        ParsedQuery query,
+        int maxResults,
+        bool includeDirectories,
+        SearchOptions options)
     {
         var results = new List<FileEntry>();
         using var cmd = Conn().CreateCommand();
@@ -249,24 +262,57 @@ public sealed class IndexDatabase : IDisposable
             """);
 
         var where = new List<string>();
+        var termClauses = new List<string>();
 
         for (int i = 0; i < query.Terms.Count; i++)
         {
             var term = query.Terms[i];
             var pname = $"$like{i}";
             bool isWildcard = term.Contains('*') || term.Contains('?');
-            string pattern = isWildcard
-                ? QueryParser.ShellWildcardToLike(term)
-                : QueryParser.PlainTermToLike(term);
 
-            // Filename wildcards match name only so D*.pdf cannot hit via a folder like \docs\
-            // Plain terms and path-shaped wildcards may also match path.
-            bool pathWildcard = isWildcard && (term.Contains('\\') || term.Contains('/'));
-            if (isWildcard && !pathWildcard)
-                where.Add($"LOWER(name) LIKE LOWER({pname}) ESCAPE '\\'");
+            if (options.WholeWord && !isWildcard)
+            {
+                // Exact = match on name or path segment via LIKE boundaries is refined in-memory;
+                // SQL uses name = / LOWER(name) = for primary filter.
+                if (options.MatchCase)
+                {
+                    termClauses.Add($"(name = {pname} OR path = {pname} OR path LIKE {pname}_seg ESCAPE '\\')");
+                    cmd.Parameters.AddWithValue(pname, term);
+                    cmd.Parameters.AddWithValue(pname + "_seg", "%\\" + QueryParser.EscapeLikeLiteral(term));
+                }
+                else
+                {
+                    termClauses.Add($"(LOWER(name) = LOWER({pname}) OR LOWER(path) = LOWER({pname}) OR LOWER(path) LIKE LOWER({pname}_seg) ESCAPE '\\')");
+                    cmd.Parameters.AddWithValue(pname, term);
+                    // Match ...\term or ...\term\... or ...\term.ext — refine in-memory
+                    cmd.Parameters.AddWithValue(pname + "_seg", "%\\" + QueryParser.EscapeLikeLiteral(term) + "%");
+                }
+            }
             else
-                where.Add($"(LOWER(name) LIKE LOWER({pname}) ESCAPE '\\' OR LOWER(path) LIKE LOWER({pname}) ESCAPE '\\')");
-            cmd.Parameters.AddWithValue(pname, pattern);
+            {
+                string pattern = isWildcard
+                    ? QueryParser.ShellWildcardToLike(term)
+                    : QueryParser.PlainTermToLike(term);
+
+                // Filename wildcards match name only so D*.pdf cannot hit via a folder like \docs\
+                // Plain terms and path-shaped wildcards may also match path.
+                bool pathWildcard = isWildcard && (term.Contains('\\') || term.Contains('/'));
+                string nameExpr = options.MatchCase ? "name" : "LOWER(name)";
+                string pathExpr = options.MatchCase ? "path" : "LOWER(path)";
+                string likeExpr = options.MatchCase ? pname : $"LOWER({pname})";
+
+                if (isWildcard && !pathWildcard)
+                    termClauses.Add($"{nameExpr} LIKE {likeExpr} ESCAPE '\\'");
+                else
+                    termClauses.Add($"({nameExpr} LIKE {likeExpr} ESCAPE '\\' OR {pathExpr} LIKE {likeExpr} ESCAPE '\\')");
+                cmd.Parameters.AddWithValue(pname, pattern);
+            }
+        }
+
+        if (termClauses.Count > 0)
+        {
+            var joiner = query.Mode == MatchMode.Or ? " OR " : " AND ";
+            where.Add("(" + string.Join(joiner, termClauses) + ")");
         }
 
         if (query.Extensions.Count > 0)
@@ -284,10 +330,12 @@ public sealed class IndexDatabase : IDisposable
         if (!includeDirectories)
             where.Add("is_directory = 0");
 
+        AppendDriveFilter(where, cmd, options.EnabledDrivePrefixes, alias: "");
+
         if (where.Count == 0 && string.IsNullOrWhiteSpace(query.Raw))
             return results;
 
-        // ext-only query with no terms
+        // ext-only query with no terms and no drive filter somehow
         if (where.Count == 0)
             return results;
 
@@ -300,10 +348,10 @@ public sealed class IndexDatabase : IDisposable
         while (reader.Read())
         {
             var entry = ReadEntry(reader);
-            // Refine with in-memory matcher so ? / * semantics stay consistent
+            // Refine with in-memory matcher so ? / * / case / whole-word semantics stay consistent
             if (query.Terms.Count > 0 || query.Extensions.Count > 0)
             {
-                if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension))
+                if (!QueryParser.Matches(query, entry.Name, entry.Path, entry.Extension, options.MatchCase, options.WholeWord))
                     continue;
             }
 
@@ -313,6 +361,32 @@ public sealed class IndexDatabase : IDisposable
         }
 
         return results;
+    }
+
+    private static void AppendDriveFilter(
+        List<string> where,
+        SqliteCommand cmd,
+        IReadOnlyList<string> prefixes,
+        string alias)
+    {
+        if (prefixes.Count == 0)
+        {
+            where.Add("1 = 0");
+            return;
+        }
+
+        var parts = new List<string>();
+        for (int i = 0; i < prefixes.Count; i++)
+        {
+            var pname = $"$drv{i}";
+            // Path prefix: C:\...  (also accept forward slash)
+            parts.Add($"{alias}path LIKE {pname} ESCAPE '\\'");
+            var prefix = prefixes[i];
+            if (!prefix.EndsWith('\\') && !prefix.EndsWith('/'))
+                prefix += "\\";
+            cmd.Parameters.AddWithValue(pname, QueryParser.EscapeLikeLiteral(prefix) + "%");
+        }
+        where.Add("(" + string.Join(" OR ", parts) + ")");
     }
 
     private static FileEntry ReadEntry(SqliteDataReader reader)

@@ -53,8 +53,10 @@ public sealed class FileIndexer
         long filesIndexed = 0;
         long dirsScanned = 0;
         var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+        // Rebuild Index uses enabled drives only (chips). No new per-drive watchers.
         var roots = _settings.IndexedRoots
             .Where(Directory.Exists)
+            .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? Array.Empty<string>()))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

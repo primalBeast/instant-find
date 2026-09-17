@@ -7,9 +7,23 @@ namespace InstantFind.Models;
 public sealed class AppSettings
 {
     public List<string> IndexedRoots { get; set; } = new();
+
+    /// <summary>
+    /// Drive letters included in search results and full rebuilds, e.g. "C:", "D:".
+    /// Missing/null on load is filled from IndexedRoots; empty means none enabled.
+    /// </summary>
+    public List<string>? EnabledDrives { get; set; }
+
     public int MaxResults { get; set; } = 10000;
     public bool IncludeDirectories { get; set; } = true;
     public bool StartIndexingOnLaunch { get; set; } = true;
+
+    /// <summary>And | Or | LiteralWhitespace — default And.</summary>
+    public MatchMode MatchMode { get; set; } = MatchMode.And;
+
+    public bool MatchCase { get; set; }
+    public bool WholeWord { get; set; }
+
     public List<string> ExcludedDirectoryNames { get; set; } = new()
     {
         "$Recycle.Bin",

@@ -1,8 +1,8 @@
 # Instant Find
 
-**Crowdstrike-friendly** instant filename/path search for Windows — inspired by the idea of Everything, built as a clean user-mode app.
+**Crowdstrike-friendly** instant filename/path search for Windows. Built as a clean user-mode app — no kernel drivers, no raw MFT or USN journal access, no packers or obfuscation.
 
-Instant Find indexes your drives with ordinary .NET directory enumeration and SQLite FTS5, then searches as you type. No kernel drivers. No raw MFT or USN journal access. No packers or obfuscation.
+Instant Find indexes your drives with ordinary .NET directory enumeration and SQLite FTS5, then searches as you type.
 
 ## Download (no GitHub login required)
 
@@ -11,13 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (once a tag exists) | `https://github.com/primalBeast/instant-find/releases/download/vX.Y.Z/InstantFind-win-x64.zip` |
-
-Example after `v1.0.1` is published:
-
-```text
-https://github.com/primalBeast/instant-find/releases/download/v1.0.1/InstantFind-win-x64.zip
-```
+| Direct zip (v1.0.2) | https://github.com/primalBeast/instant-find/releases/download/v1.0.2/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -45,15 +39,19 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features
+## Features (v1.0.2)
 
 - Instant as-you-type search after the first index completes
 - Search spinner while a query is in flight (search runs off the UI thread)
+- **And / Or** checkboxes (right of title): default And; both off = literal whitespace (spaces must appear in the name)
+- **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
+- Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, then the query box
+- Match Case or Whole Word leaves FTS and uses SQL `LIKE` / `=` (still capped by `maxResults`)
 - Results columns: **Name**, **Path**, **Size**, **Date Modified**
+- Context menu: Open, Open Containing Folder, **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing)
 - Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
-- Double-click opens the file (or folder)
 - Filters:
-  - Substring match (case-insensitive) via FTS5
+  - Substring match via FTS5 (case-insensitive, unless Match Case / Whole Word)
   - Wildcards `*` and `?` via SQL `LIKE` (e.g. `D*.pdf`, `*.pdf`, `test?.txt`)
   - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
 - Parallel multi-root indexing with progress status
@@ -86,8 +84,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.1 && git push origin v1.0.1`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** (optional version input)
+1. **Tag** — push a version tag: `git tag v1.0.2 && git push origin v1.0.2`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.2`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 
@@ -96,7 +94,7 @@ Produces `InstantFind-win-x64.zip` on the Release assets.
 ```text
 InstantFind.sln
 src/InstantFind/          # WPF app (.NET 8)
-tests/InstantFind.Tests/  # xUnit query-matching tests
+tests/InstantFind.Tests/  # xUnit query-matching / mode tests
 .github/workflows/        # win-x64 publish + Release upload
 ```
 
@@ -104,4 +102,4 @@ tests/InstantFind.Tests/  # xUnit query-matching tests
 
 MIT — see [LICENSE](LICENSE).
 
-**Instant Find** is an independent project and is not affiliated with voidtools or Everything.
+**Instant Find** is an independent project and is not affiliated with voidtools.

@@ -9,12 +9,25 @@
         Foreground="{StaticResource FgBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
   <DockPanel Margin="12">
-    <!-- Header -->
+    <!-- Header: title + And/Or + rebuild -->
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-      <TextBlock Text="Instant Find"
-                 FontSize="20" FontWeight="SemiBold"
-                 VerticalAlignment="Center"
-                 DockPanel.Dock="Left"/>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+        <TextBlock Text="Instant Find"
+                   FontSize="20" FontWeight="SemiBold"
+                   VerticalAlignment="Center"
+                   Margin="0,0,16,0"/>
+        <CheckBox Content="And"
+                  IsChecked="{Binding IsAndChecked}"
+                  VerticalAlignment="Center"
+                  Margin="0,0,10,0"
+                  Foreground="{StaticResource FgBrush}"
+                  ToolTip="All terms must match (default)"/>
+        <CheckBox Content="Or"
+                  IsChecked="{Binding IsOrChecked}"
+                  VerticalAlignment="Center"
+                  Foreground="{StaticResource FgBrush}"
+                  ToolTip="Any term may match. Both And and Or off = literal spaces in the name."/>
+      </StackPanel>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Content="Rebuild Index"
                 Command="{Binding RebuildIndexCommand}"
@@ -32,21 +45,64 @@
       </StackPanel>
     </DockPanel>
 
-    <!-- Search box + spinner -->
+    <!-- Search bar: clear / Match Case / Whole Word / box / spinner -->
     <Border DockPanel.Dock="Top"
             Background="{StaticResource PanelBrush}"
             BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1"
             CornerRadius="4"
-            Padding="8,6"
+            Padding="6,4"
             Margin="0,0,0,8">
       <Grid>
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
+
+        <Button Grid.Column="0"
+                Content="✕"
+                Command="{Binding ClearQueryCommand}"
+                Width="28" Height="28"
+                Margin="0,0,4,0"
+                FontSize="12" FontWeight="Bold"
+                Foreground="#E81123"
+                Background="Transparent"
+                BorderThickness="0"
+                Cursor="Hand"
+                ToolTip="Clear search"
+                VerticalAlignment="Center"/>
+
+        <ToggleButton Grid.Column="1"
+                      Content="Aa"
+                      IsChecked="{Binding MatchCase}"
+                      Width="32" Height="28"
+                      Margin="0,0,4,0"
+                      FontWeight="SemiBold"
+                      Background="{StaticResource PanelBrush}"
+                      Foreground="{StaticResource FgBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      ToolTip="Match Case"
+                      Cursor="Hand"
+                      VerticalAlignment="Center"/>
+
+        <ToggleButton Grid.Column="2"
+                      Content="W"
+                      IsChecked="{Binding WholeWord}"
+                      Width="32" Height="28"
+                      Margin="0,0,6,0"
+                      FontWeight="SemiBold"
+                      Background="{StaticResource PanelBrush}"
+                      Foreground="{StaticResource FgBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      ToolTip="Whole Word"
+                      Cursor="Hand"
+                      VerticalAlignment="Center"/>
+
         <TextBox x:Name="SearchBox"
-                 Grid.Column="0"
+                 Grid.Column="3"
                  Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                  FontSize="16"
                  Background="Transparent"
@@ -54,7 +110,8 @@
                  BorderThickness="0"
                  CaretBrush="{StaticResource FgBrush}"
                  VerticalContentAlignment="Center"/>
-        <ProgressBar Grid.Column="1"
+
+        <ProgressBar Grid.Column="4"
                      Width="22" Height="22"
                      Margin="8,0,0,0"
                      IsIndeterminate="True"
@@ -67,22 +124,53 @@
     </Border>
 
     <TextBlock DockPanel.Dock="Top"
-               Text="Filters: substrings, * and ? wildcards, ext:pdf  ·  Enter/double-click open  ·  Ctrl+Enter open folder"
+               Text="Filters: substrings, * and ? wildcards, ext:pdf  ·  And/Or/literal spaces  ·  Enter/double-click open  ·  Ctrl+Enter open folder"
                Foreground="{StaticResource MutedBrush}"
                FontSize="11"
                Margin="0,0,0,8"
                TextWrapping="Wrap"/>
 
-    <!-- Status -->
+    <!-- Status + drive chips -->
     <StatusBar DockPanel.Dock="Bottom"
                Background="{StaticResource PanelBrush}"
                Foreground="{StaticResource MutedBrush}"
                Margin="0,8,0,0">
-      <StatusBarItem>
-        <TextBlock Text="{Binding StatusText}"/>
+      <StatusBar.ItemsPanel>
+        <ItemsPanelTemplate>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+          </Grid>
+        </ItemsPanelTemplate>
+      </StatusBar.ItemsPanel>
+      <StatusBarItem Grid.Column="0">
+        <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis"/>
       </StatusBarItem>
-      <StatusBarItem HorizontalAlignment="Right">
-        <TextBlock Text="{Binding IndexedRootsDisplay}" Opacity="0.7"/>
+      <StatusBarItem Grid.Column="1" HorizontalAlignment="Right">
+        <ItemsControl ItemsSource="{Binding DriveChips}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <ToggleButton Content="{Binding Letter}"
+                            IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                            Margin="4,0,0,0"
+                            Padding="8,2"
+                            MinWidth="36"
+                            FontWeight="SemiBold"
+                            Background="{StaticResource PanelBrush}"
+                            Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            Cursor="Hand"
+                            ToolTip="Toggle drive in results / rebuild"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
       </StatusBarItem>
     </StatusBar>
 
@@ -133,9 +221,10 @@
         <DataGridTextColumn Header="Date Modified" Binding="{Binding ModifiedDisplay}" Width="140"/>
       </DataGrid.Columns>
       <DataGrid.ContextMenu>
-        <ContextMenu>
+        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
           <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
           <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
+          <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.InputBindings>

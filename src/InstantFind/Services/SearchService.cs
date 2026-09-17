@@ -13,12 +13,12 @@ public sealed class SearchService
         _settings = settings;
     }
 
-    public IReadOnlyList<FileEntry> Search(string queryText)
+    public IReadOnlyList<FileEntry> Search(string queryText, SearchOptions options)
     {
-        var parsed = QueryParser.Parse(queryText);
+        var parsed = QueryParser.Parse(queryText, options.MatchMode);
         if (string.IsNullOrWhiteSpace(queryText))
             return Array.Empty<FileEntry>();
 
-        return _db.Search(parsed, _settings.MaxResults, _settings.IncludeDirectories);
+        return _db.Search(parsed, _settings.MaxResults, _settings.IncludeDirectories, options);
     }
 }
