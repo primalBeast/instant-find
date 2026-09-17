@@ -42,7 +42,8 @@ public static class QueryParser
     /// "C:\Projects\*.pdf" → scope=C:\Projects\, rest=*.pdf.
     /// </summary>
     private static readonly Regex PathScopeRegex = new(
-        @"^(?<scope>[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n]+\\)*)(?<rest>.*)$",
+        // First char of each segment must be non-whitespace (keeps "C:\Projects\ \72" rest=\72).
+        @"^(?<scope>[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n\s][^\\/:*?""<>|\r\n]*\\)*)(?<rest>.*)$",
         RegexOptions.Compiled);
 
     public static ParsedQuery Parse(string? input, MatchMode mode = MatchMode.And, bool useRegex = false)
