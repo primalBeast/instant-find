@@ -109,7 +109,7 @@ public sealed class FileIndexer
             long dirsScanned = 0;
             long skippedLocked = 0;
             var exclude = new HashSet<string>(
-                _settings.ExcludedDirectoryNames ?? Array.Empty<string>(),
+                _settings.ExcludedDirectoryNames ?? new List<string>(),
                 StringComparer.OrdinalIgnoreCase);
             // Path-prefix common excludes (Filter checkboxes) own these names — never basename-skip them.
             foreach (var n in ExcludePaths.PathPrefixControlledNames)
