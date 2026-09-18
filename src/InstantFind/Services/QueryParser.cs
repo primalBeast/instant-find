@@ -1127,9 +1127,10 @@ public static class QueryParser
     }
 
 
-    /// <summary>Escape <c>\</c> and <c>"</c> so a token can be Tokenize'd again safely.</summary>
+    /// <summary>Escape <c>"</c> so a token can be Tokenize'd again safely (do not escape \ — path terms).</summary>
     private static string EscapeForRetokenize(string token)
-        => token.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        // Only " needs escaping for Tokenize; do not escape \ (path terms like \72).
+        => token.Replace("\"", "\\\"");
 
     /// <summary>
     /// Splits on whitespace outside double quotes. Quote characters are delimiters only
