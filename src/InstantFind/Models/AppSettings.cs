@@ -41,11 +41,13 @@ public sealed class AppSettings
     /// <summary>Show Attributes column in results grid.</summary>
     public bool ShowAttributesColumn { get; set; }
 
+    /// <summary>
+    /// Basename-only crawl skips (any drive). Do NOT put "Windows" / "$Recycle.Bin" /
+    /// "System Volume Information" here — those are controlled by Filter → Exclude path prefixes.
+    /// Legacy settings that listed them are stripped on load (v1.0.19).
+    /// </summary>
     public List<string> ExcludedDirectoryNames { get; set; } = new()
     {
-        "$Recycle.Bin",
-        "System Volume Information",
-        "Windows",
         "node_modules",
         ".git",
         ".svn"

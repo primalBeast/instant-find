@@ -26,6 +26,39 @@ public static class ExcludePaths
             @"%LOCALAPPDATA%\Microsoft\Windows\INetCache", false),
     };
 
+
+    /// <summary>
+    /// Basenames that must never live in <c>ExcludedDirectoryNames</c>.
+    /// They are gated only by path-prefix common excludes (Filter checkboxes).
+    /// A legacy bare name "Windows" blocked every folder named Windows on every drive,
+    /// so unchecking Filter → Exclude → Windows still never indexed <c>C:\Windows\...\hosts</c>.
+    /// </summary>
+    public static readonly string[] PathPrefixControlledNames =
+    {
+        "Windows",
+        "$Recycle.Bin",
+        "System Volume Information",
+    };
+
+    /// <summary>Removes path-prefix-controlled basenames from a mutable name-exclude list.</summary>
+    public static void StripPathPrefixControlledNames(IList<string>? names)
+    {
+        if (names is null || names.Count == 0)
+            return;
+        for (int i = names.Count - 1; i >= 0; i--)
+        {
+            var n = names[i];
+            foreach (var blocked in PathPrefixControlledNames)
+            {
+                if (string.Equals(n, blocked, StringComparison.OrdinalIgnoreCase))
+                {
+                    names.RemoveAt(i);
+                    break;
+                }
+            }
+        }
+    }
+
     public static string Expand(string pathOrTemplate)
     {
         if (string.IsNullOrWhiteSpace(pathOrTemplate))

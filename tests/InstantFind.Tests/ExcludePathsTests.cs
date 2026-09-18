@@ -43,4 +43,54 @@ public class ExcludePathsTests
     {
         Assert.Contains("windows", ExcludePaths.DefaultCheckedIds());
     }
+
+
+    [Fact]
+    public void StripPathPrefixControlledNames_removes_Windows_and_recycle()
+    {
+        var names = new List<string> { "Windows", "node_modules", "$Recycle.Bin", ".git", "System Volume Information" };
+        ExcludePaths.StripPathPrefixControlledNames(names);
+        Assert.DoesNotContain("Windows", names, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("$Recycle.Bin", names, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("System Volume Information", names, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("node_modules", names);
+        Assert.Contains(".git", names);
+    }
+
+    [Fact]
+    public void ResolveActivePrefixes_windows_unchecked_does_not_exclude_hosts_path()
+    {
+        var settings = new AppSettings
+        {
+            CheckedCommonExcludeIds = new List<string>(), // windows unchecked
+            CommonExcludesInitialized = true,
+            ExcludedDirectoryNames = new List<string> { "Windows", "node_modules" } // legacy bare name
+        };
+        ExcludePaths.StripPathPrefixControlledNames(settings.ExcludedDirectoryNames);
+        var prefixes = ExcludePaths.ResolveActivePrefixes(settings);
+        Assert.DoesNotContain(prefixes, p => p.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase));
+        Assert.False(ExcludePaths.IsUnderAny(@"C:\Windows\System32\drivers\etc\hosts", prefixes));
+        Assert.DoesNotContain("Windows", settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveActivePrefixes_windows_checked_excludes_hosts_path()
+    {
+        var settings = new AppSettings
+        {
+            CheckedCommonExcludeIds = new List<string> { "windows" },
+            CommonExcludesInitialized = true
+        };
+        var prefixes = ExcludePaths.ResolveActivePrefixes(settings);
+        Assert.True(ExcludePaths.IsUnderAny(@"C:\Windows\System32\drivers\etc\hosts", prefixes));
+    }
+
+    [Fact]
+    public void Default_ExcludedDirectoryNames_must_not_include_Windows()
+    {
+        var settings = new AppSettings();
+        Assert.DoesNotContain("Windows", settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("$Recycle.Bin", settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("node_modules", settings.ExcludedDirectoryNames);
+    }
 }

@@ -12,7 +12,7 @@
     <Company>primalBeast</Company>
     <Copyright>Copyright (c) 2026 primalBeast</Copyright>
     <Description>Crowdstrike-friendly instant filename search for Windows. User-mode only — no drivers, no MFT/USN access.</Description>
-    <Version>1.0.18</Version>
+    <Version>1.0.19</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 

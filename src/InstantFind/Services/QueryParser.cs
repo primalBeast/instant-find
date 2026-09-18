@@ -7,8 +7,8 @@ namespace InstantFind.Services;
 /// <summary>
 /// Parses Instant Find query syntax: substrings, * ? wildcards, optional ext:pdf filters,
 /// type macros (doc:/img:/…), size:/dm: filters, Everything-style !NOT terms,
-/// optional directory path-scope (leading Windows path ending in \), Everything-like
-/// path terms (leading \), and optional regex body.
+/// double-quoted exact phrases, optional directory path-scope (leading Windows path ending in \),
+/// Everything-like path terms (leading \), and optional regex body.
 /// </summary>
 public sealed class ParsedQuery
 {
@@ -1124,12 +1124,25 @@ public static class QueryParser
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Splits on whitespace outside double quotes. Quote characters are delimiters only
+    /// (Everything-style exact phrase) — they are never kept as literal search characters.
+    /// Use <c>\"</c> inside a quoted phrase to include a literal double-quote in the term.
+    /// </summary>
     private static IEnumerable<string> Tokenize(string input)
     {
         var sb = new StringBuilder();
         bool inQuotes = false;
-        foreach (var c in input)
+        for (int i = 0; i < input.Length; i++)
         {
+            var c = input[i];
+            // Escaped quote → literal " (inside or outside phrases)
+            if (c == '\\' && i + 1 < input.Length && input[i + 1] == '"')
+            {
+                sb.Append('"');
+                i++;
+                continue;
+            }
             if (c == '"')
             {
                 inQuotes = !inQuotes;

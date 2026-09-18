@@ -807,4 +807,96 @@ public class QueryParserTests
         Assert.True(q.HasWildcards);
         Assert.Null(QueryParser.BuildFtsMatch(q));
     }
+
+
+    // ----- v1.0.19: quoted exact phrases -----
+
+    [Fact]
+    public void Quoted_phrase_is_exact_contiguous_match()
+    {
+        var q = QueryParser.Parse("\"annual report\"");
+        Assert.Single(q.Terms);
+        Assert.Equal("annual report", q.Terms[0]);
+        Assert.DoesNotContain("\"", q.Terms[0]);
+        Assert.True(QueryParser.Matches(q, "annual report.pdf", @"C:\docs\annual report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual_report.pdf", @"C:\docs\annual_report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual.xlsx", @"C:\finance\annual.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "report.xlsx", @"C:\finance\report.xlsx", "xlsx"));
+    }
+
+    [Fact]
+    public void Quoted_phrase_does_not_require_literal_quote_chars_in_name()
+    {
+        var q = QueryParser.Parse("\"annual report\"");
+        // Filename that happens to contain " must not be required / must not falsely help
+        Assert.False(QueryParser.Matches(q, "ann\"ual report.txt", @"C:\docs\ann\"ual report.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "annual report.txt", @"C:\docs\annual report.txt", "txt"));
+    }
+
+    [Fact]
+    public void Unquoted_terms_still_split_And()
+    {
+        var q = QueryParser.Parse("annual report", MatchMode.And);
+        Assert.Equal(2, q.Terms.Count);
+        Assert.True(QueryParser.Matches(q, "annual_report.xlsx", @"C:\finance\annual_report.xlsx", "xlsx"));
+        Assert.False(QueryParser.Matches(q, "annual.xlsx", @"C:\finance\annual.xlsx", "xlsx"));
+    }
+
+    [Fact]
+    public void Multiple_quoted_phrases_and_mix_with_unquoted_Not_macro()
+    {
+        var q = QueryParser.Parse("\"annual report\" budget !draft doc:");
+        Assert.Contains("annual report", q.Terms);
+        Assert.Contains("budget", q.Terms);
+        Assert.Contains("draft", q.NotTerms);
+        Assert.Contains("pdf", q.Extensions);
+        Assert.True(QueryParser.Matches(q, "annual report budget.pdf", @"C:\docs\annual report budget.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual report budget draft.pdf", @"C:\docs\annual report budget draft.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual_report budget.pdf", @"C:\docs\annual_report budget.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Quoted_phrase_with_path_scope()
+    {
+        var q = QueryParser.Parse(@"C:\Projects\ ""annual report""");
+        Assert.Equal(@"C:\Projects\", q.PathScope);
+        Assert.Contains("annual report", q.Terms);
+        Assert.True(QueryParser.Matches(q, "annual report.pdf", @"C:\Projects\annual report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual report.pdf", @"C:\Other\annual report.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Escaped_quote_inside_phrase()
+    {
+        var q = QueryParser.Parse("\"foo\\\"bar\"");
+        Assert.Single(q.Terms);
+        Assert.Equal("foo\"bar", q.Terms[0]);
+        Assert.True(QueryParser.Matches(q, "foo\"bar.txt", @"C:\docs\foo\"bar.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "foobar.txt", @"C:\docs\foobar.txt", "txt"));
+    }
+
+    [Fact]
+    public void Not_quoted_phrase()
+    {
+        var q = QueryParser.Parse("report !\"temp file\"");
+        Assert.Contains("report", q.Terms);
+        Assert.Contains("temp file", q.NotTerms);
+        Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "report temp file.pdf", @"C:\docs\report temp file.pdf", "pdf"));
+    }
+
+    [Fact]
+    public void BuildFtsMatch_null_for_quoted_phrase_with_space()
+    {
+        var q = QueryParser.Parse("\"annual report\"");
+        Assert.Null(QueryParser.BuildFtsMatch(q)); // space → LIKE contiguous phrase
+    }
+
+    [Fact]
+    public void Extensionless_hosts_matches_hosts_query()
+    {
+        var q = QueryParser.Parse("hosts");
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\Windows\System32\drivers\etc\hosts", ""));
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\Windows\System32\drivers\etc\hosts", "", matchCase: false));
+    }
 }

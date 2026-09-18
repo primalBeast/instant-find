@@ -108,7 +108,12 @@ public sealed class FileIndexer
             long filesIndexed = 0;
             long dirsScanned = 0;
             long skippedLocked = 0;
-            var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
+            var exclude = new HashSet<string>(
+                _settings.ExcludedDirectoryNames ?? Array.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
+            // Path-prefix common excludes (Filter checkboxes) own these names — never basename-skip them.
+            foreach (var n in ExcludePaths.PathPrefixControlledNames)
+                exclude.Remove(n);
             var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings);
             var roots = _settings.IndexedRoots
                 .Where(Directory.Exists)

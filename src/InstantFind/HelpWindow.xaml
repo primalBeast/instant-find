@@ -42,6 +42,14 @@
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
                      Text="Type part of a name. Results update as you type. ✕ clears the box. Aa = match case. W = whole word. .* = regex on the filename (case still follows Aa). And / Or control how multiple terms combine."/>
 
+          <TextBlock Text="Quoted phrases" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
+          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
+                     Text="Put a phrase in double quotes for an exact contiguous match on the name/path (Everything-style): &quot;annual report&quot; matches that phrase, not the words separately. Quote marks are delimiters only — filenames do not need to contain &quot;. Mix with unquoted terms, !NOT, path scope, and macros. Use \&quot; inside a phrase for a literal quote character."/>
+
+          <TextBlock Text="Exclude / hosts" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
+          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
+                     Text="Filter → Exclude checkboxes use folder paths (e.g. C:\Windows), not a permanent ban on the name Windows. Uncheck Windows, then Rebuild Index once, to find files such as C:\Windows\System32\drivers\etc\hosts. Extensionless names like hosts match a search for hosts."/>
+
           <TextBlock Text="Paths" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
                      Text="A path ending in \ scopes the search to that folder (e.g. C:\Logs\). A leading \ starts a path-segment search (e.g. \72 finds folders/files whose path has a segment starting with 72). Spaces before \72 still scope correctly: C:\Logs  \72."/>

@@ -112,7 +112,9 @@ public sealed class SettingsService
         if (settings.MaxResults <= 0 || settings.MaxResults == LegacyDefaultMaxResults)
             settings.MaxResults = DefaultMaxResults;
         if (settings.ExcludedDirectoryNames is null)
-            settings.ExcludedDirectoryNames = new List<string>();
+            settings.ExcludedDirectoryNames = new List<string> { "node_modules", ".git", ".svn" };
+        else
+            ExcludePaths.StripPathPrefixControlledNames(settings.ExcludedDirectoryNames);
         if (settings.IndexedRoots is null)
             settings.IndexedRoots = new List<string>();
 
