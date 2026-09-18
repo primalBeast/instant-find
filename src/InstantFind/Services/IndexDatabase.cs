@@ -25,7 +25,10 @@ public sealed class IndexDatabase : IDisposable
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            // Private + no pooling: Dispose must release the OS handle before File.Replace
+            // of index.db (Shared/pool left WAL/SHM held → ERROR_SHARING_VIOLATION 0x80070020).
+            Cache = SqliteCacheMode.Private,
+            Pooling = false,
             DefaultTimeout = 5 // seconds; pairs with PRAGMA busy_timeout
         }.ToString();
     }
@@ -127,7 +130,13 @@ public sealed class IndexDatabase : IDisposable
         EnsureSchemaMigrations();
     }
 
-    /// <summary>Close the SQLite connection without disposing the IndexDatabase wrapper.</summary>
+    /// <summary>True while a live SqliteConnection is open.</summary>
+    public bool IsOpen => _connection is not null;
+
+    /// <summary>
+    /// Fully close and release the live SQLite connection (checkpoint WAL, close, dispose, null out,
+    /// clear pools). Must run before any File.Replace / Move / Delete of index.db or -wal/-shm.
+    /// </summary>
     public void Close()
     {
         lock (_writeLock)
@@ -143,10 +152,14 @@ public sealed class IndexDatabase : IDisposable
                 }
                 catch { /* best-effort */ }
 
+                try { _connection.Close(); } catch { }
                 try { _connection.Dispose(); } catch { }
                 _connection = null;
             }
         }
+
+        // Belt-and-suspenders: release any pooled/native handles before file ops
+        try { SqliteConnection.ClearAllPools(); } catch { }
     }
 
     /// <summary>Path that last failed during Replace/Move/Delete (for error log).</summary>
@@ -154,21 +167,27 @@ public sealed class IndexDatabase : IDisposable
 
     /// <summary>
     /// Atomically replace the live DB file with a successful rebuild DB.
-    /// Caller must Close() this instance first; call Open() after.
-    /// Retries on sharing violations (AV / second instance / leftover handles).
+    /// Ensures this instance is fully Closed first (WAL checkpoint + dispose + clear pools),
+    /// deletes live/rebuild -wal/-shm, then File.Replace with longer retries for AV scanners.
+    /// Caller should Open() after success (or after failure to keep previous index).
     /// </summary>
     public void ReplaceWithRebuildFile(string rebuildDatabasePath)
     {
         if (string.Equals(rebuildDatabasePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Rebuild path must differ from live database path.");
 
+        // Never swap while our own live connection (or pool) still holds index.db
+        Close();
+
         LastFailedFilePath = null;
 
         // Encourage release of any lingering native handles before file ops
         GC.Collect();
         GC.WaitForPendingFinalizers();
+        try { SqliteConnection.ClearAllPools(); } catch { }
 
-        const int maxAttempts = 10;
+        const int maxAttempts = 20; // ~2s at 100ms — AV scanners often release quickly after close
+        const int delayMs = 100;
         Exception? last = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -194,6 +213,8 @@ public sealed class IndexDatabase : IDisposable
                     File.Move(rebuildDatabasePath, DatabasePath);
                 }
 
+                // Sidecars for the new live file come from the rebuild copy; drop stale ones
+                TryDeleteSidecars(DatabasePath);
                 TryDeleteSqliteFiles(rebuildDatabasePath);
                 LastFailedFilePath = null;
                 return;
@@ -201,17 +222,16 @@ public sealed class IndexDatabase : IDisposable
             catch (IOException ex)
             {
                 last = ex;
-                // 50–200ms-ish backoff (capped); AV / second instance often releases quickly
-                var delay = Math.Min(200, 40 + 20 * attempt);
-                Thread.Sleep(delay);
+                Thread.Sleep(delayMs);
+                try { SqliteConnection.ClearAllPools(); } catch { }
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
             catch (UnauthorizedAccessException ex)
             {
                 last = ex;
-                var delay = Math.Min(200, 40 + 20 * attempt);
-                Thread.Sleep(delay);
+                Thread.Sleep(delayMs);
+                try { SqliteConnection.ClearAllPools(); } catch { }
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }

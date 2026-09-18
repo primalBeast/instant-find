@@ -245,11 +245,16 @@ public sealed class FileIndexer
                     skippedLocked: finalSkipped);
             }
 
+            // pause watchers (MainViewModel) → close live DB → swap (+ WAL/SHM) → reopen → resume
             _db.Close();
+            if (_db.IsOpen)
+                throw new InvalidOperationException("Live index DB still open after Close(); refusing swap.");
+
             try
             {
                 try
                 {
+                    // ReplaceWithRebuildFile also Close()s defensively, clears pools, retries 20×100ms
                     _db.ReplaceWithRebuildFile(rebuildPath);
                     swapSucceeded = true;
                 }

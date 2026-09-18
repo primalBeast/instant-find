@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.17) | https://github.com/primalBeast/instant-find/releases/download/v1.0.17/InstantFind-win-x64.zip |
+| Direct zip (v1.0.18) | https://github.com/primalBeast/instant-find/releases/download/v1.0.18/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -47,8 +47,9 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.17)
+## Features (v1.0.18)
 
+- **Close-before-swap (v1.0.18)**: Rebuild fully checkpoints/closes/disposes the live SQLite connection (and clears pools; pooling off) **before** `File.Replace` of `index.db`, and deletes `-wal`/`-shm` alongside. Longer swap retries (20×100ms) for AV. Soft-skip / cloud-drive exclude / error log unchanged.
 - **Error log beside exe (v1.0.17)**: On index failure (and soft-skip summaries / sharing violations), appends `InstantFind-error.log` next to `InstantFind.exe` with UTC time, version, full exception (type/message/HResult/stack), failed path, live vs rebuild DB paths, second-instance hint, and skip counts. Paste that log when reporting index issues.
 - **DB lock harden (v1.0.17)**: SQLite `busy_timeout`, open/swap/delete retries with backoff, watchers+prune paused during rebuild, concurrent Rebuild ignored. If live/rebuild `File.Replace` still fails after retries, **previous index is kept** and status points at the error log (no cryptic bare sharing message only).
 - **No cloud-mapped letters (v1.0.17)**: Google Drive for desktop / File Stream, OneDrive, Dropbox, etc. are excluded even when `DriveType` is Fixed (label + root markers via `DriveHelpers.IsIndexableLocalDrive`). Saved `IndexedRoots` / chips pruned on load.
@@ -108,7 +109,7 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.17)
+## Query syntax (v1.0.18)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -150,8 +151,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.17 && git push origin v1.0.17`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.17`
+1. **Tag** — push a version tag: `git tag v1.0.18 && git push origin v1.0.18`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.18`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 
