@@ -3,16 +3,55 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Instant Find — Help"
         Icon="pack://application:,,,/Assets/app.ico"
-        Height="560" Width="560"
-        MinHeight="360" MinWidth="420"
+        Height="720" Width="780"
+        MinHeight="420" MinWidth="560"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource BgBrush}"
         Foreground="{StaticResource FgBrush}"
         ShowInTaskbar="False"
         ResizeMode="CanResizeWithGrip"
         PreviewKeyDown="Window_PreviewKeyDown">
-  <DockPanel Margin="16">
-    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+  <Window.Resources>
+    <Style x:Key="SectionCard" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource BgBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="14,12"/>
+      <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+    <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+    <Style x:Key="SectionBlurb" TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Foreground" Value="{StaticResource FgBrush}"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="LineHeight" Value="18"/>
+      <Setter Property="Margin" Value="0,0,0,10"/>
+    </Style>
+    <Style x:Key="ExampleLabel" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Consolas, Cascadia Mono, Courier New"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+      <Setter Property="VerticalAlignment" Value="Top"/>
+      <Setter Property="Margin" Value="0,0,12,0"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style x:Key="ExampleNote" TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+      <Setter Property="VerticalAlignment" Value="Top"/>
+      <Setter Property="LineHeight" Value="17"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel Margin="18">
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
       <Button Content="Close"
               Click="Close_Click"
               Padding="14,6"
@@ -25,62 +64,343 @@
               BorderBrush="{StaticResource AccentBrush}"
               BorderThickness="1"
               FontWeight="SemiBold"/>
-      <TextBlock Text="Help"
-                 FontSize="18" FontWeight="SemiBold"
-                 VerticalAlignment="Center"/>
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock Text="Help" FontSize="20" FontWeight="SemiBold"/>
+        <TextBlock Text="Quick reference — examples in monospace"
+                   FontSize="12"
+                   Foreground="{StaticResource MutedBrush}"
+                   Margin="0,2,0,0"/>
+      </StackPanel>
     </DockPanel>
 
     <Border Background="{StaticResource PanelBrush}"
             BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1"
             CornerRadius="4"
-            Padding="14">
+            Padding="16,14">
       <ScrollViewer VerticalScrollBarVisibility="Auto"
-                    HorizontalScrollBarVisibility="Disabled">
+                    HorizontalScrollBarVisibility="Disabled"
+                    Padding="0,0,4,0">
         <StackPanel>
-          <TextBlock Text="Search basics" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Type part of a name. Results update as you type. ✕ clears the box. Aa = match case. W = whole word. .* = regex on the filename (case still follows Aa). And / Or control how multiple terms combine."/>
 
-          <TextBlock Text="Quoted exact file name" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Double quotes match the file name exactly (basename including extension), not a substring: &quot;hosts&quot; finds only a file named hosts — not hostsim or hosts.txt. &quot;annual report&quot; matches only a file named exactly annual report; use &quot;annual report.pdf&quot; to find the PDF. Case follows Aa. Whole Word does not change quoted matching. Unquoted terms stay substring / And/Or. Mix with unquoted terms, !NOT (e.g. !&quot;hosts&quot;), path scope, and macros. Use \&quot; inside quotes for a literal quote character."/>
+          <!-- Search basics -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Search basics"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Type part of a name. Results update as you type."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="✕"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}" Text="Clear the search box"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Aa  ·  W  ·  .*"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Match case · whole word · regex on the filename (case follows Aa)"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="And / Or"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="How multiple terms combine (default And)"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Exclude / hosts" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Filter → Exclude checkboxes use folder paths (e.g. C:\Windows), not a permanent ban on the name Windows. Uncheck Windows, then Rebuild Index once, to find files such as C:\Windows\System32\drivers\etc\hosts. Extensionless names like hosts match a search for hosts."/>
+          <!-- Quoted exact name -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Quoted exact file name"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Double quotes match the file name exactly (basename including extension), not a substring. Case follows Aa. Whole Word does not change quoted matching."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text='"hosts"'/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Only a file named hosts — not hostsim or hosts.txt"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text='"annual report.pdf"'/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Exact name including extension; &quot;annual report&quot; alone is name-only"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text='!"hosts"'/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Exclude that exact name; mix with unquoted terms, path scope, macros"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text='\"'/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Literal quote character inside quotes"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Paths" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="A path ending in \ scopes the search to that folder (e.g. C:\Logs\). A leading \ starts a path-segment search (e.g. \72 finds folders/files whose path has a segment starting with 72). Spaces before \72 still scope correctly: C:\Logs  \72."/>
+          <!-- Exclude / hosts -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Exclude / hosts"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Filter → Exclude checkboxes use folder paths (e.g. C:\Windows), not a permanent ban on the name Windows."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Uncheck Windows"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Then Rebuild Index once to find C:\Windows\System32\drivers\etc\hosts"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="hosts"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Extensionless names like hosts match a search for hosts"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="NOT" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Prefix a term with ! to exclude it: report !temp   or   !*.tmp"/>
+          <!-- Paths -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Paths"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Scope to a folder or match a path segment (Everything-like)."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="C:\Logs\"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Path ending in \ scopes search to that folder"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="\72"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Leading \ — path segment starting with 72"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="C:\Logs  \72"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Spaces before \72 still scope correctly"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Size and date" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="size:>1mb   size:0   size:1mb..10mb&#x0a;dm:today   dm:thisweek   dm:thisyear   dm:2024..2026&#x0a;Use the Filter button (left of And/Or) for presets, type groups, and saved filters."/>
+          <!-- NOT -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="NOT"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Prefix a term with ! to exclude it."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="report !temp"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Must match report, must not match temp"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="!*.tmp"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Exclude wildcard matches"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Macros (type shortcuts)" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="doc:  img:  vid:  audio:  zip:  code:  xls:  ppt:  exe:  font:  iso:&#x0a;Example: doc: budget"/>
+          <!-- Size and date -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Size and date"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Filter button (left of And/Or) for presets, type groups, and saved filters."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="size:>10mb"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Also size:0 · size:1mb..10mb"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="dm:today"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Also dm:thisweek · dm:thisyear · dm:2024..2026"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Results" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Double-click to open. Right-click for Open with…, Notepad++, Command Prompt, Git Bash, and Show Extension / Attributes columns. Drag rows out to Explorer or other apps. Drive chips toggle which drives appear in results (they do not rebuild the index)."/>
+          <!-- Macros -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Macros (type shortcuts)"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Expand to common extension sets (same as Filter → Type)."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}"
+                           Text="doc:  img:  vid:  audio:  zip:  code:  xls:  ppt:  exe:  font:  iso:"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="doc: budget"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Documents whose name matches budget"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Exclude folders" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Filter → Exclude: check common folders (C:\Windows, Program Files, …) or add your own with +. Excluded paths are hidden from results immediately and skipped on the next Rebuild Index."/>
+          <!-- Results -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Results"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Work with hits without leaving the search window."/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Double-click"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}" Text="Open the file"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Right-click"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Open with…, Notepad++, Command Prompt, Git Bash, Show Extension / Attributes"/>
+              </Grid>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Drag row"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Drop into Explorer or other apps"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Drive chips"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Toggle which drives appear in results (do not rebuild the index)"/>
+              </Grid>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Index" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Rebuild Index scans local drives in user mode (SQLite + FileSystemWatcher). Cancel stops a rebuild safely. Instant Find never uses kernel drivers, raw MFT, or USN journal scraping — Crowdstrike-friendly by design."/>
+          <!-- Exclude folders -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Exclude folders"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Filter → Exclude: check common folders (C:\Windows, Program Files, …) or add your own with +. Excluded paths are hidden from results immediately and skipped on the next Rebuild Index."/>
+            </StackPanel>
+          </Border>
 
-          <TextBlock Text="Keyboard" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-          <TextBlock TextWrapping="Wrap" Margin="0,0,0,4" LineHeight="18"
-                     Text="Esc — close Filter popup (or focus the search box). Down — jump into results. Esc in this Help window closes it."/>
+          <!-- Index -->
+          <Border Style="{StaticResource SectionCard}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Index"/>
+              <TextBlock Style="{StaticResource SectionBlurb}"
+                         Text="Rebuild Index scans local drives in user mode (SQLite + FileSystemWatcher). Cancel stops a rebuild safely."/>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="200"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="CrowdStrike-safe"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Never uses kernel drivers, raw MFT, or USN journal scraping — user-mode only by design"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- Keyboard -->
+          <Border Style="{StaticResource SectionCard}" Margin="0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Keyboard"/>
+              <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="Esc"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Close Filter popup, or focus the search box — Esc here closes Help"/>
+              </Grid>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource ExampleLabel}" Text="↓"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource ExampleNote}"
+                           Text="Jump into results"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
         </StackPanel>
       </ScrollViewer>
     </Border>
