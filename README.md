@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.21) | https://github.com/primalBeast/instant-find/releases/download/v1.0.21/InstantFind-win-x64.zip |
+| Direct zip (v1.0.22) | https://github.com/primalBeast/instant-find/releases/download/v1.0.22/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -47,7 +47,7 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.21)
+## Features (v1.0.22)
 
 - **Help layout (v1.0.21)**: Help window redesigned for scannability — section cards with short blurbs, two-column example rows (query in monospace + what it does), generous spacing, larger default size with scroll. Same content accuracy (quotes, paths, NOT, size/date, macros, Exclude, CrowdStrike note, keyboard). Esc still closes.
 - **Quoted exact file name (v1.0.20)**: `"hosts"` matches only a file whose name is exactly `hosts` (not `hostsim`, not `hosts.txt`). `"annual report"` matches only a file named exactly `annual report` — use `"annual report.pdf"` to find the PDF. Case follows **Aa**; Whole Word does not change quoted matching. Unquoted terms keep substring / And/Or. Mix with unquoted terms, `!"hosts"`, path scope, and macros. Escape a literal quote inside quotes with `\"`.
@@ -71,8 +71,8 @@ Settings and the index database live under:
   - **Type macros**: `doc:`, `img:`/`image:`, `vid:`/`video:`, `audio:`, `zip:`/`archive:`, `code:`, `xls:`, `ppt:`, `exe:`, `font:`, `iso:` — expand to common extension sets (same as Filter → Type).
   - **Saved filters**: name + save current query; one-click activate; persisted in `settings.json`.
   - **Extra columns**: context menu → Show Extension / Show Attributes (R/H/S/A/… from index or live `File.GetAttributes`).
-- **Path scope + path term spaces (v1.0.12)**: `C:\Logs  \72` (spaces, no trailing `\` after the folder) scopes to `C:\Logs\` and applies Everything-like segment prefix `\72`. Also `C:\Logs\`, `C:\Logs\ \72` / `C:\Logs\\72`, global `\72`, and normal name search under a scoped path. Search always completes (spinner off); silent refresh no longer orphans in-flight searches.
-- **Path term `\72` (v1.0.11)**: Everything-like — a term starting with `\` matches a **path/directory segment** that **starts with** the rest (e.g. `\72` hits `C:\data\72folder\…` and `C:\docs\72report.txt`, but not bare-name FTS that ignores `\` and would match `6728` / `x72y`). Leaves FTS; SQL `LIKE` on `path` only. Drive path-scope unchanged: `C:\foo\` still scopes.
+- **Path scope + path term spaces (v1.0.12)**: `C:\Logs  \72` (spaces, no trailing `\` after the folder) scopes to `C:\Logs\` and applies Instant Find segment prefix `\72`. Also `C:\Logs\`, `C:\Logs\ \72` / `C:\Logs\\72`, global `\72`, and normal name search under a scoped path. Search always completes (spinner off); silent refresh no longer orphans in-flight searches.
+- **Path term `\72` (v1.0.11)**: Instant Find path matching — a term starting with `\` matches a **path/directory segment** that **starts with** the rest (e.g. `\72` hits `C:\data\72folder\…` and `C:\docs\72report.txt`, but not bare-name FTS that ignores `\` and would match `6728` / `x72y`). Leaves FTS; SQL `LIKE` on `path` only. Drive path-scope unchanged: `C:\foo\` still scopes.
 - **App icon (v1.0.10)**: Windows exe / window icon from `Assets/app.ico` (multi-size). Source art: ![Instant Find icon](src/InstantFind/Assets/app-icon.png)
 - **Literal `_` / `-` in search (v1.0.10)**: FTS5 `unicode61` treats `_` and `-` (and other non-alphanumeric characters) as token separators, so a plain FTS query like `72_` previously matched names such as `6728`. Terms containing those characters now **leave FTS** and use SQL `LIKE` with `ESCAPE '\'` (same as wildcards), so `72_` requires a literal underscore and `a-b` requires a literal hyphen.
 - **Atomic rebuild + delete prune (v1.0.9)**: Rebuild writes to a temporary `index-rebuild.db` beside the live index and **atomically swaps** only on success. Cancel or crash mid-rebuild **keeps the previous live index** (leftover rebuild files are discarded on next launch). Progress shows **Preparing rebuild…** / **Scanning… N items — path** immediately (no stuck “Starting index…”). Cancel is cooperative; UI shows **Indexing cancelled — previous index kept.** and **restarts watchers**. Deleted/renamed folders remove rows by `path` and by `directory` (exact + under). Watcher buffer overflows schedule a **background prune** of missing paths; search refresh also drops hits that no longer exist on disk.
@@ -112,7 +112,7 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.21)
+## Query syntax (v1.0.22)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -126,7 +126,7 @@ Settings and the index database live under:
 | `dm:today` `dm:thisweek` `dm:thisyear` | Date-modified presets |
 | `dm:2024-01-01..2024-12-31` | Date-modified range |
 | `C:\Work\` | Path scope (trailing `\`) |
-| `\72` | Path segment prefix (Everything-like) |
+| `\72` | Instant Find path segment prefix |
 | `.*` toggle | .NET regex on filename |
 
 ## Build from source
@@ -155,8 +155,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.21 && git push origin v1.0.21`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.21`
+1. **Tag** — push a version tag: `git tag v1.0.22 && git push origin v1.0.22`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.22`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

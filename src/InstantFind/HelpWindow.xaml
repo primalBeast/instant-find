@@ -195,7 +195,7 @@
             <StackPanel>
               <TextBlock Style="{StaticResource SectionTitle}" Text="Paths"/>
               <TextBlock Style="{StaticResource SectionBlurb}"
-                         Text="Scope to a folder or match a path segment (Everything-like)."/>
+                         Text="Scope to a folder or match a path segment with Instant Find."/>
               <Grid Margin="0,0,0,6">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="200"/>
