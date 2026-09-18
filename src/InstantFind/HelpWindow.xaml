@@ -42,9 +42,9 @@
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
                      Text="Type part of a name. Results update as you type. ✕ clears the box. Aa = match case. W = whole word. .* = regex on the filename (case still follows Aa). And / Or control how multiple terms combine."/>
 
-          <TextBlock Text="Quoted phrases" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
+          <TextBlock Text="Quoted exact file name" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"
-                     Text="Put a phrase in double quotes for an exact contiguous match on the name/path (Everything-style): &quot;annual report&quot; matches that phrase, not the words separately. Quote marks are delimiters only — filenames do not need to contain &quot;. Mix with unquoted terms, !NOT, path scope, and macros. Use \&quot; inside a phrase for a literal quote character."/>
+                     Text="Double quotes match the file name exactly (basename including extension), not a substring: &quot;hosts&quot; finds only a file named hosts — not hostsim or hosts.txt. &quot;annual report&quot; matches only a file named exactly annual report; use &quot;annual report.pdf&quot; to find the PDF. Case follows Aa. Whole Word does not change quoted matching. Unquoted terms stay substring / And/Or. Mix with unquoted terms, !NOT (e.g. !&quot;hosts&quot;), path scope, and macros. Use \&quot; inside quotes for a literal quote character."/>
 
           <TextBlock Text="Exclude / hosts" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
           <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18"

@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.19) | https://github.com/primalBeast/instant-find/releases/download/v1.0.19/InstantFind-win-x64.zip |
+| Direct zip (v1.0.20) | https://github.com/primalBeast/instant-find/releases/download/v1.0.20/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -47,9 +47,9 @@ Settings and the index database live under:
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.19)
+## Features (v1.0.20)
 
-- **Quoted exact phrases (v1.0.19)**: `"annual report"` matches that contiguous phrase on the name/path (Everything-style). Quote characters are delimiters only (not required in filenames). Unquoted terms keep And/Or/literal-whitespace behavior. Mix with `!NOT`, path scope, and macros. Escape a literal quote inside a phrase with `\"`.
+- **Quoted exact file name (v1.0.20)**: `"hosts"` matches only a file whose name is exactly `hosts` (not `hostsim`, not `hosts.txt`). `"annual report"` matches only a file named exactly `annual report` — use `"annual report.pdf"` to find the PDF. Case follows **Aa**; Whole Word does not change quoted matching. Unquoted terms keep substring / And/Or. Mix with unquoted terms, `!"hosts"`, path scope, and macros. Escape a literal quote inside quotes with `\"`.
 - **Windows exclude vs hosts (v1.0.19)**: Filter → Exclude → Windows is path-based (`C:\Windows\…`) only. A legacy basename skip for the folder name `Windows` no longer blocks crawl when that checkbox is off — so `C:\Windows\System32\drivers\etc\hosts` can be found after you uncheck Windows and **Rebuild Index** once. Extensionless `hosts` matches a search for `hosts`.
 - **Close-before-swap (v1.0.18)**: Rebuild fully checkpoints/closes/disposes the live SQLite connection (and clears pools; pooling off) **before** `File.Replace` of `index.db`, and deletes `-wal`/`-shm` alongside. Longer swap retries (20×100ms) for AV. Soft-skip / cloud-drive exclude / error log unchanged.
 - **Error log beside exe (v1.0.17)**: On index failure (and soft-skip summaries / sharing violations), appends `InstantFind-error.log` next to `InstantFind.exe` with UTC time, version, full exception (type/message/HResult/stack), failed path, live vs rebuild DB paths, second-instance hint, and skip counts. Paste that log when reporting index issues.
@@ -111,12 +111,12 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.19)
+## Query syntax (v1.0.20)
 
 | Syntax | Meaning |
 |--------|---------|
 | `report budget` | And (default): all terms |
-| `"annual report"` | Exact contiguous phrase (quotes are delimiters; `\"` = literal quote) |
+| `"hosts"` / `"annual report.pdf"` | Exact file **name** (basename incl. extension); quotes are delimiters; `\"` = literal quote |
 | `report` + Or checked | Any term |
 | `!temp` / `report !*.tmp` | Exclude term / wildcard |
 | `ext:pdf` | Extension filter |
@@ -154,8 +154,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.19 && git push origin v1.0.19`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.19`
+1. **Tag** — push a version tag: `git tag v1.0.20 && git push origin v1.0.20`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.20`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

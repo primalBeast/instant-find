@@ -484,10 +484,10 @@ public sealed class IndexDatabase : IDisposable
         if (options.EnabledDrivePrefixes.Count == 0)
             return Array.Empty<FileEntry>();
 
-        // Match Case / Whole Word / wildcards / regex / NOT → leave FTS.
+        // Match Case / Whole Word / wildcards / regex / NOT / quoted exact-name → leave FTS.
         // PathScope alone does NOT leave FTS — keep FTS + SQL path prefix filter.
         bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards
-                        || query.UseRegex || query.HasNotTerms;
+                        || query.UseRegex || query.HasNotTerms || query.ExactNameTerms.Count > 0;
         if (leaveFts)
             return SearchWithLike(query, maxResults, includeDirectories, options);
 
@@ -624,6 +624,17 @@ public sealed class IndexDatabase : IDisposable
                     : QueryParser.PathTermToLike(term);
                 termClauses.Add($"{pathExpr} LIKE {likeExpr} ESCAPE '\\'");
                 cmd.Parameters.AddWithValue(pname, pattern);
+                continue;
+            }
+
+            // Quoted exact file-name: name equality only (not path substring).
+            if (query.ExactNameTerms.Contains(term))
+            {
+                if (options.MatchCase)
+                    termClauses.Add($"name = {pname}");
+                else
+                    termClauses.Add($"LOWER(name) = LOWER({pname})");
+                cmd.Parameters.AddWithValue(pname, term);
                 continue;
             }
 

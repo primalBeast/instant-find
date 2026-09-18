@@ -7,7 +7,7 @@ namespace InstantFind.Services;
 /// <summary>
 /// Parses Instant Find query syntax: substrings, * ? wildcards, optional ext:pdf filters,
 /// type macros (doc:/img:/…), size:/dm: filters, Everything-style !NOT terms,
-/// double-quoted exact phrases, optional directory path-scope (leading Windows path ending in \),
+/// double-quoted exact file-name matches, optional directory path-scope (leading Windows path ending in \),
 /// Everything-like path terms (leading \), and optional regex body.
 /// </summary>
 public sealed class ParsedQuery
@@ -45,6 +45,19 @@ public sealed class ParsedQuery
     public bool HasSizeFilter => SizeMin.HasValue || SizeMax.HasValue;
     public bool HasDateFilter => ModifiedAfterUtc.HasValue || ModifiedBeforeUtc.HasValue;
     public bool HasNotTerms => NotTerms.Count > 0;
+
+    /// <summary>
+    /// Positive terms that must equal <c>FileEntry.Name</c> (basename incl. extension) exactly.
+    /// Populated from double-quoted phrases. Comparison case follows Match Case at match time.
+    /// </summary>
+    public HashSet<string> ExactNameTerms { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Exclusion terms that must equal <c>FileEntry.Name</c> exactly (from <c>!"name"</c>).
+    /// </summary>
+    public HashSet<string> ExactNameNotTerms { get; } = new(StringComparer.Ordinal);
+
+    public bool HasExactNameTerms => ExactNameTerms.Count > 0 || ExactNameNotTerms.Count > 0;
 }
 
 public static class QueryParser
@@ -143,7 +156,7 @@ public static class QueryParser
             return result;
         }
 
-        foreach (var token in Tokenize(working))
+        foreach (var (token, quoted) in Tokenize(working))
         {
             if (string.IsNullOrWhiteSpace(token))
                 continue;
@@ -151,14 +164,26 @@ public static class QueryParser
             if (token.StartsWith('!') && token.Length > 1)
             {
                 var notTerm = token[1..];
-                if (notTerm.Contains('*') || notTerm.Contains('?'))
+                if (quoted)
+                {
+                    result.ExactNameNotTerms.Add(notTerm);
+                }
+                else if (notTerm.Contains('*') || notTerm.Contains('?'))
+                {
                     result.HasWildcards = true;
+                }
                 result.NotTerms.Add(notTerm);
                 continue;
             }
 
-            if (token.Contains('*') || token.Contains('?'))
+            if (quoted)
+            {
+                result.ExactNameTerms.Add(token);
+            }
+            else if (token.Contains('*') || token.Contains('?'))
+            {
                 result.HasWildcards = true;
+            }
             result.Terms.Add(token);
         }
 
@@ -304,7 +329,8 @@ public static class QueryParser
             positivesOk = false;
             foreach (var term in query.Terms)
             {
-                if (TermMatches(term, name, fullPath, comparison, wholeWord))
+                var exact = query.ExactNameTerms.Contains(term);
+                if (TermMatches(term, name, fullPath, comparison, wholeWord, exact))
                 {
                     positivesOk = true;
                     break;
@@ -317,7 +343,8 @@ public static class QueryParser
             positivesOk = true;
             foreach (var term in query.Terms)
             {
-                if (!TermMatches(term, name, fullPath, comparison, wholeWord))
+                var exact = query.ExactNameTerms.Contains(term);
+                if (!TermMatches(term, name, fullPath, comparison, wholeWord, exact))
                 {
                     positivesOk = false;
                     break;
@@ -344,7 +371,8 @@ public static class QueryParser
         var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         foreach (var term in query.NotTerms)
         {
-            if (TermMatches(term, name, fullPath, comparison, wholeWord))
+            var exact = query.ExactNameNotTerms.Contains(term);
+            if (TermMatches(term, name, fullPath, comparison, wholeWord, exact))
                 return true;
         }
         return false;
@@ -527,7 +555,7 @@ public static class QueryParser
     }
 
     public static bool TermMatches(string term, string name, string fullPath)
-        => TermMatches(term, name, fullPath, StringComparison.OrdinalIgnoreCase, wholeWord: false);
+        => TermMatches(term, name, fullPath, StringComparison.OrdinalIgnoreCase, wholeWord: false, exactName: false);
 
     public static bool TermMatches(
         string term,
@@ -535,7 +563,24 @@ public static class QueryParser
         string fullPath,
         StringComparison comparison,
         bool wholeWord)
+        => TermMatches(term, name, fullPath, comparison, wholeWord, exactName: false);
+
+    /// <summary>
+    /// When <paramref name="exactName"/> is true (quoted phrase), match <paramref name="name"/> /
+    /// basename only with equality — not a substring of name or path. Whole Word is ignored.
+    /// Wildcards in an exact-name term are literal characters.
+    /// </summary>
+    public static bool TermMatches(
+        string term,
+        string name,
+        string fullPath,
+        StringComparison comparison,
+        bool wholeWord,
+        bool exactName)
     {
+        if (exactName)
+            return ExactNameMatches(term, name, fullPath, comparison);
+
         // Everything-like \72: path/directory segment starts with rest — never bare-name FTS.
         if (IsPathTerm(term))
             return PathTermMatches(term, fullPath, comparison, wholeWord);
@@ -569,6 +614,20 @@ public static class QueryParser
 
         return fullPath.Contains(term, comparison)
                || name.Contains(term, comparison);
+    }
+
+    /// <summary>
+    /// Exact file-name match for a quoted phrase: <paramref name="name"/> (or basename of
+    /// <paramref name="fullPath"/>) must equal <paramref name="term"/> under <paramref name="comparison"/>.
+    /// </summary>
+    public static bool ExactNameMatches(string term, string name, string fullPath, StringComparison comparison)
+    {
+        if (string.Equals(name, term, comparison))
+            return true;
+        if (string.IsNullOrEmpty(fullPath))
+            return false;
+        var baseName = System.IO.Path.GetFileName(fullPath);
+        return string.Equals(baseName, term, comparison);
     }
 
     /// <summary>
@@ -777,7 +836,7 @@ public static class QueryParser
     /// </summary>
     public static string? BuildFtsMatch(ParsedQuery query)
     {
-        if (query.UseRegex || query.HasWildcards)
+        if (query.UseRegex || query.HasWildcards || query.ExactNameTerms.Count > 0)
             return null;
 
         if (query.Terms.Count == 0)
@@ -864,7 +923,7 @@ public static class QueryParser
             return working ?? string.Empty;
 
         var sb = new StringBuilder();
-        foreach (var token in Tokenize(working))
+        foreach (var (token, wasQuoted) in Tokenize(working))
         {
             if (FileTypeMacros.TryResolveMacro(token, out var group) && group is not null)
             {
@@ -876,10 +935,12 @@ public static class QueryParser
                 continue;
             }
             if (sb.Length > 0) sb.Append(' ');
-            // Re-emit for a later Tokenize pass: escape \ and " so phrase
+            // Re-emit for a later Tokenize pass: escape " so phrase
             // contents (including literal quotes) survive the round-trip.
+            // Preserve quote delimiters for originally-quoted tokens (incl. single-word
+            // exact-name phrases like "hosts") and for tokens that contain spaces.
             var escaped = EscapeForRetokenize(token);
-            if (token.Contains(' '))
+            if (wasQuoted || token.Contains(' '))
             {
                 sb.Append('"');
                 sb.Append(escaped);
@@ -1134,13 +1195,15 @@ public static class QueryParser
 
     /// <summary>
     /// Splits on whitespace outside double quotes. Quote characters are delimiters only
-    /// (Everything-style exact phrase) — they are never kept as literal search characters.
+    /// (exact file-name match) — they are never kept as literal search characters.
     /// Use <c>\"</c> inside a quoted phrase to include a literal double-quote in the term.
+    /// The <c>Quoted</c> flag is true when the token used quote delimiters (incl. <c>!"name"</c>).
     /// </summary>
-    private static IEnumerable<string> Tokenize(string input)
+    private static IEnumerable<(string Token, bool Quoted)> Tokenize(string input)
     {
         var sb = new StringBuilder();
         bool inQuotes = false;
+        bool quoted = false;
         for (int i = 0; i < input.Length; i++)
         {
             var c = input[i];
@@ -1154,20 +1217,22 @@ public static class QueryParser
             if (c == '"')
             {
                 inQuotes = !inQuotes;
+                quoted = true;
                 continue;
             }
             if (!inQuotes && char.IsWhiteSpace(c))
             {
                 if (sb.Length > 0)
                 {
-                    yield return sb.ToString();
+                    yield return (sb.ToString(), quoted);
                     sb.Clear();
+                    quoted = false;
                 }
                 continue;
             }
             sb.Append(c);
         }
         if (sb.Length > 0)
-            yield return sb.ToString();
+            yield return (sb.ToString(), quoted);
     }
 }

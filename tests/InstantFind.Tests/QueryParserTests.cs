@@ -809,28 +809,71 @@ public class QueryParserTests
     }
 
 
-    // ----- v1.0.19: quoted exact phrases -----
+    // ----- v1.0.20: quoted exact file-name match -----
 
     [Fact]
-    public void Quoted_phrase_is_exact_contiguous_match()
+    public void Quoted_phrase_is_exact_file_name_only()
     {
         var q = QueryParser.Parse("\"annual report\"");
         Assert.Single(q.Terms);
         Assert.Equal("annual report", q.Terms[0]);
+        Assert.Contains("annual report", q.ExactNameTerms);
         Assert.DoesNotContain("\"", q.Terms[0]);
-        Assert.True(QueryParser.Matches(q, "annual report.pdf", @"C:\docs\annual report.pdf", "pdf"));
+        // Exact basename only — not substring, not with extension
+        Assert.True(QueryParser.Matches(q, "annual report", @"C:\docs\annual report", ""));
+        Assert.False(QueryParser.Matches(q, "annual report.pdf", @"C:\docs\annual report.pdf", "pdf"));
         Assert.False(QueryParser.Matches(q, "annual_report.pdf", @"C:\docs\annual_report.pdf", "pdf"));
         Assert.False(QueryParser.Matches(q, "annual.xlsx", @"C:\finance\annual.xlsx", "xlsx"));
         Assert.False(QueryParser.Matches(q, "report.xlsx", @"C:\finance\report.xlsx", "xlsx"));
     }
 
     [Fact]
+    public void Quoted_hosts_exact_name_not_substring()
+    {
+        var q = QueryParser.Parse("\"hosts\"");
+        Assert.Contains("hosts", q.ExactNameTerms);
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\Windows\System32\drivers\etc\hosts", ""));
+        Assert.False(QueryParser.Matches(q, "hostsim", @"C:\tmp\hostsim", ""));
+        Assert.False(QueryParser.Matches(q, "hosts.txt", @"C:\tmp\hosts.txt", "txt"));
+        // Unquoted still substring
+        var u = QueryParser.Parse("hosts");
+        Assert.Empty(u.ExactNameTerms);
+        Assert.True(QueryParser.Matches(u, "hosts.txt", @"C:\tmp\hosts.txt", "txt"));
+        Assert.True(QueryParser.Matches(u, "hostsim", @"C:\tmp\hostsim", ""));
+    }
+
+    [Fact]
+    public void Quoted_annual_report_pdf_requires_extension_in_quotes()
+    {
+        var q = QueryParser.Parse("\"annual report.pdf\"");
+        Assert.True(QueryParser.Matches(q, "annual report.pdf", @"C:\docs\annual report.pdf", "pdf"));
+        Assert.False(QueryParser.Matches(q, "annual report", @"C:\docs\annual report", ""));
+        Assert.False(QueryParser.Matches(q, "annual report.txt", @"C:\docs\annual report.txt", "txt"));
+    }
+
+    [Fact]
     public void Quoted_phrase_does_not_require_literal_quote_chars_in_name()
     {
         var q = QueryParser.Parse("\"annual report\"");
-        // Filename that happens to contain " must not be required / must not falsely help
-        Assert.False(QueryParser.Matches(q, "ann\"ual report.txt", @"C:\docs\ann""ual report.txt", "txt"));
-        Assert.True(QueryParser.Matches(q, "annual report.txt", @"C:\docs\annual report.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "ann\"ual report", @"C:\docs\ann""ual report", ""));
+        Assert.True(QueryParser.Matches(q, "annual report", @"C:\docs\annual report", ""));
+    }
+
+    [Fact]
+    public void Quoted_exact_name_respects_MatchCase()
+    {
+        var q = QueryParser.Parse("\"Hosts\"");
+        Assert.True(QueryParser.Matches(q, "Hosts", @"C:\etc\Hosts", "", matchCase: true));
+        Assert.False(QueryParser.Matches(q, "hosts", @"C:\etc\hosts", "", matchCase: true));
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\etc\hosts", "", matchCase: false));
+    }
+
+    [Fact]
+    public void Quoted_exact_name_not_broken_by_WholeWord()
+    {
+        var q = QueryParser.Parse("\"hosts\"");
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\etc\hosts", "", matchCase: false, wholeWord: true));
+        Assert.False(QueryParser.Matches(q, "hosts.txt", @"C:\etc\hosts.txt", "txt", matchCase: false, wholeWord: true));
     }
 
     [Fact]
@@ -838,58 +881,80 @@ public class QueryParserTests
     {
         var q = QueryParser.Parse("annual report", MatchMode.And);
         Assert.Equal(2, q.Terms.Count);
+        Assert.Empty(q.ExactNameTerms);
         Assert.True(QueryParser.Matches(q, "annual_report.xlsx", @"C:\finance\annual_report.xlsx", "xlsx"));
         Assert.False(QueryParser.Matches(q, "annual.xlsx", @"C:\finance\annual.xlsx", "xlsx"));
     }
 
     [Fact]
-    public void Multiple_quoted_phrases_and_mix_with_unquoted_Not_macro()
+    public void Mix_quoted_exact_name_with_unquoted_path_term()
     {
-        var q = QueryParser.Parse("\"annual report\" budget !draft doc:");
-        Assert.Contains("annual report", q.Terms);
-        Assert.Contains("budget", q.Terms);
+        // Exact name hosts AND unquoted System32 (path/name substring)
+        var q = QueryParser.Parse("\"hosts\" System32");
+        Assert.Contains("hosts", q.ExactNameTerms);
+        Assert.Contains("System32", q.Terms);
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\Windows\System32\drivers\etc\hosts", ""));
+        Assert.False(QueryParser.Matches(q, "hosts", @"C:\Other\hosts", ""));
+        Assert.False(QueryParser.Matches(q, "hosts.txt", @"C:\Windows\System32\hosts.txt", "txt"));
+    }
+
+    [Fact]
+    public void Multiple_quoted_and_unquoted_Not_macro()
+    {
+        // Exact name "budget" + unquoted report + !draft + doc:
+        var q = QueryParser.Parse("\"budget\" report !draft doc:");
+        Assert.Contains("budget", q.ExactNameTerms);
+        Assert.Contains("report", q.Terms);
         Assert.Contains("draft", q.NotTerms);
         Assert.Contains("pdf", q.Extensions);
-        Assert.True(QueryParser.Matches(q, "annual report budget.pdf", @"C:\docs\annual report budget.pdf", "pdf"));
-        Assert.False(QueryParser.Matches(q, "annual report budget draft.pdf", @"C:\docs\annual report budget draft.pdf", "pdf"));
-        Assert.False(QueryParser.Matches(q, "annual_report budget.pdf", @"C:\docs\annual_report budget.pdf", "pdf"));
+        Assert.True(QueryParser.Matches(q, "budget", @"C:\docs\report\budget", "pdf"));
+        Assert.False(QueryParser.Matches(q, "budget", @"C:\docs\draft\budget", "pdf")); // draft excluded via path
+        Assert.False(QueryParser.Matches(q, "budget.pdf", @"C:\docs\report\budget.pdf", "pdf")); // not exact name
     }
 
     [Fact]
     public void Quoted_phrase_with_path_scope()
     {
-        var q = QueryParser.Parse(@"C:\Projects\ ""annual report""");
-        Assert.Equal(@"C:\Projects\", q.PathScope);
-        Assert.Contains("annual report", q.Terms);
-        Assert.True(QueryParser.Matches(q, "annual report.pdf", @"C:\Projects\annual report.pdf", "pdf"));
-        Assert.False(QueryParser.Matches(q, "annual report.pdf", @"C:\Other\annual report.pdf", "pdf"));
+        var q = QueryParser.Parse(@"C:\Windows\System32\drivers\etc\ ""hosts""");
+        Assert.Equal(@"C:\Windows\System32\drivers\etc\", q.PathScope);
+        Assert.Contains("hosts", q.ExactNameTerms);
+        Assert.True(QueryParser.Matches(q, "hosts", @"C:\Windows\System32\drivers\etc\hosts", ""));
+        Assert.False(QueryParser.Matches(q, "hosts", @"C:\Other\hosts", ""));
+        Assert.False(QueryParser.Matches(q, "hosts.txt", @"C:\Windows\System32\drivers\etc\hosts.txt", "txt"));
     }
 
     [Fact]
-    public void Escaped_quote_inside_phrase()
+    public void Escaped_quote_inside_exact_name()
     {
         var q = QueryParser.Parse("\"foo\\\"bar\"");
         Assert.Single(q.Terms);
         Assert.Equal("foo\"bar", q.Terms[0]);
-        Assert.True(QueryParser.Matches(q, "foo\"bar.txt", @"C:\docs\foo""bar.txt", "txt"));
-        Assert.False(QueryParser.Matches(q, "foobar.txt", @"C:\docs\foobar.txt", "txt"));
+        Assert.Contains("foo\"bar", q.ExactNameTerms);
+        Assert.True(QueryParser.Matches(q, "foo\"bar", @"C:\docs\foo""bar", ""));
+        Assert.False(QueryParser.Matches(q, "foo\"bar.txt", @"C:\docs\foo""bar.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "foobar", @"C:\docs\foobar", ""));
     }
 
     [Fact]
-    public void Not_quoted_phrase()
+    public void Not_quoted_exact_name()
     {
-        var q = QueryParser.Parse("report !\"temp file\"");
+        var q = QueryParser.Parse("report !\"hosts\"");
         Assert.Contains("report", q.Terms);
-        Assert.Contains("temp file", q.NotTerms);
+        Assert.Contains("hosts", q.NotTerms);
+        Assert.Contains("hosts", q.ExactNameNotTerms);
         Assert.True(QueryParser.Matches(q, "report.pdf", @"C:\docs\report.pdf", "pdf"));
-        Assert.False(QueryParser.Matches(q, "report temp file.pdf", @"C:\docs\report temp file.pdf", "pdf"));
+        // Substring hosts.txt is NOT excluded by !"hosts" (exact name only)
+        Assert.True(QueryParser.Matches(q, "report-hosts.txt", @"C:\docs\report-hosts.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "hosts", @"C:\docs\report\hosts", "")); // exact name excluded
     }
 
     [Fact]
-    public void BuildFtsMatch_null_for_quoted_phrase_with_space()
+    public void BuildFtsMatch_null_for_quoted_exact_name()
     {
-        var q = QueryParser.Parse("\"annual report\"");
-        Assert.Null(QueryParser.BuildFtsMatch(q)); // space → LIKE contiguous phrase
+        var q = QueryParser.Parse("\"hosts\"");
+        Assert.Null(QueryParser.BuildFtsMatch(q));
+        var q2 = QueryParser.Parse("\"annual report\"");
+        Assert.Null(QueryParser.BuildFtsMatch(q2));
     }
 
     [Fact]
