@@ -20,6 +20,67 @@ public class DriveHelpersTests
     }
 
     [Theory]
+    [InlineData("Google Drive", true)]
+    [InlineData("Google Drive File Stream", true)]
+    [InlineData("OneDrive", true)]
+    [InlineData("Dropbox", true)]
+    [InlineData("My Passport", false)]
+    [InlineData("Windows", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void LooksLikeCloudVolumeLabel_detects_providers(string? label, bool expected)
+    {
+        Assert.Equal(expected, DriveHelpers.LooksLikeCloudVolumeLabel(label));
+    }
+
+    [Fact]
+    public void HasGoogleDriveRootMarkers_detects_shortcut_targets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "if-gdrive-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, ".shortcut-targets-by-id"));
+            Directory.CreateDirectory(Path.Combine(root, "My Drive"));
+            Assert.True(DriveHelpers.HasGoogleDriveRootMarkers(root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void HasGoogleDriveRootMarkers_my_drive_without_windows_is_cloud()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "if-gdrive2-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "My Drive"));
+            Assert.True(DriveHelpers.HasGoogleDriveRootMarkers(root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void HasDropboxRootMarkers_detects_dot_dropbox()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "if-dropbox-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(Path.Combine(root, ".dropbox"));
+            Assert.True(DriveHelpers.HasDropboxRootMarkers(root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Theory]
     [InlineData(@"\\server\share", true)]
     [InlineData(@"\\server\share\folder", true)]
     [InlineData(@"//server/share", true)]

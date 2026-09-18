@@ -462,7 +462,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void InitDriveChips()
     {
-        // Never offer network mapped letters for indexing (v1.0.16)
+        // Never offer Network / cloud-mapped letters for indexing (v1.0.17)
         var letters = DriveHelpers.FilterIndexableDriveLetters(
             DriveHelpers.GetDriveLetters(_settings.IndexedRoots));
         if (letters.Count == 0 && _settings.EnabledDrives is { Count: > 0 })
@@ -880,7 +880,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsIndexing) return;
         IsIndexing = true;
         StatusText = "Preparing rebuild…";
-        _watcher.Stop();
+        // Pause watchers + wait for prune so index.db is not held during rebuild swap
+        _watcher.PauseForRebuild();
 
         var progress = new Progress<IndexProgress>(p =>
         {
@@ -896,7 +897,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     StatusText = $"Indexed {p.FilesIndexed:N0} items";
 
                 // Always restart watchers — including cancel (previous index kept)
-                _watcher.Start(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
+                _watcher.ResumeAfterRebuild(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
 
                 if (p.Error is null)
                     _ = RunSearchAsync();
@@ -912,8 +913,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         catch (Exception ex)
         {
             IsIndexing = false;
-            StatusText = "Index failed: " + ex.Message;
-            _watcher.Start(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
+            ErrorLog.AppendFailure(
+                "RebuildIndexAsync",
+                ex,
+                failedPath: _db.LastFailedFilePath ?? _db.DatabasePath,
+                liveDbPath: _db.DatabasePath,
+                rebuildDbPath: IndexDatabase.GetRebuildPath(_db.DatabasePath));
+            StatusText = "Index failed: " + ex.Message
+                         + $" See {ErrorLog.FileName} next to InstantFind.exe.";
+            _watcher.ResumeAfterRebuild(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
         }
     }
 

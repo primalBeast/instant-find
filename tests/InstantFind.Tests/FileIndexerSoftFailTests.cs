@@ -22,6 +22,14 @@ public class FileIndexerSoftFailTests
     }
 
     [Fact]
+    public void IsSharingViolation_aligns_with_skippable_io()
+    {
+        var io = new IOException("The process cannot access the file because it is being used by another process.");
+        Assert.True(FileIndexer.IsSkippableContentException(io));
+        Assert.True(IndexDatabase.IsSharingViolation(io));
+    }
+
+    [Fact]
     public void TryCreateEntry_missing_file_returns_null_without_throw()
     {
         var missing = Path.Combine(Path.GetTempPath(), "instant-find-missing-" + Guid.NewGuid().ToString("N") + ".bin");

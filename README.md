@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.16) | https://github.com/primalBeast/instant-find/releases/download/v1.0.16/InstantFind-win-x64.zip |
+| Direct zip (v1.0.17) | https://github.com/primalBeast/instant-find/releases/download/v1.0.17/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -38,14 +38,22 @@ Settings and the index database live under:
   index-rebuild.db   (temp during rebuild; discarded if leftover)
 ```
 
-**Indexed roots**: only local Fixed/Removable volumes. Mapped network drives and UNC paths are not indexed (pruned from `indexedRoots` on load if present from an older version).
+**Indexed roots**: only physical local Fixed/Removable volumes. Never indexed (pruned from `indexedRoots` / chips on load):
+
+- Mapped network drives (`DriveType.Network`) and UNC (`\\server\share`)
+- **Cloud-mapped letters** that often report as Fixed — Google Drive for desktop / File Stream (e.g. `G:`), OneDrive, Dropbox, and similar (volume label + root folder markers)
+
+`InstantFind-error.log` is written **next to `InstantFind.exe`** (portable zip folder) on index failures and notable sharing-violation soft-skips.
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.16)
+## Features (v1.0.17)
 
-- **Skip locked files (v1.0.16)**: Rebuild no longer hard-fails when a content file is locked (`IOException` / sharing violation / access denied). Crawl skips those entries and continues; status can show `skipped N locked`. SQLite live/rebuild swap retries briefly with backoff after connections are closed + WAL checkpointed.
-- **No network / mapped drives (v1.0.16)**: Defaults, EnsureDefaults, Rebuild, and drive chips exclude `DriveType.Network` mapped letters (e.g. G:, M:) and UNC roots (`\\server\share`). Previously saved network roots are pruned from `IndexedRoots` / `EnabledDrives` on load. Local Fixed (and Removable) only — Crowdstrike-safe user-mode.
+- **Error log beside exe (v1.0.17)**: On index failure (and soft-skip summaries / sharing violations), appends `InstantFind-error.log` next to `InstantFind.exe` with UTC time, version, full exception (type/message/HResult/stack), failed path, live vs rebuild DB paths, second-instance hint, and skip counts. Paste that log when reporting index issues.
+- **DB lock harden (v1.0.17)**: SQLite `busy_timeout`, open/swap/delete retries with backoff, watchers+prune paused during rebuild, concurrent Rebuild ignored. If live/rebuild `File.Replace` still fails after retries, **previous index is kept** and status points at the error log (no cryptic bare sharing message only).
+- **No cloud-mapped letters (v1.0.17)**: Google Drive for desktop / File Stream, OneDrive, Dropbox, etc. are excluded even when `DriveType` is Fixed (label + root markers via `DriveHelpers.IsIndexableLocalDrive`). Saved `IndexedRoots` / chips pruned on load.
+- **Skip locked files (v1.0.16)**: Rebuild no longer hard-fails when a content file is locked (`IOException` / sharing violation / access denied). Crawl skips those entries and continues; status can show `skipped N locked`.
+- **No network / mapped drives (v1.0.16)**: Defaults, EnsureDefaults, Rebuild, and drive chips exclude `DriveType.Network` mapped letters and UNC roots (`\\server\share`).
 
 - **Exclude (v1.0.15)**: Filter popup → Exclude. Common folders with checkboxes (defaults: Windows, Program Files, Recycle Bin, System Volume Information, Recovery) plus custom folders via **+**. Search hides them; rebuild skips them.
 
@@ -100,7 +108,7 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.16)
+## Query syntax (v1.0.17)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -142,8 +150,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.16 && git push origin v1.0.16`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.16`
+1. **Tag** — push a version tag: `git tag v1.0.17 && git push origin v1.0.17`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.17`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

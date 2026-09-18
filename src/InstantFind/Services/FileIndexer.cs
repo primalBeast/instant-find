@@ -27,6 +27,13 @@ public sealed class FileIndexer
 
     public async Task RunFullIndexAsync(IProgress<IndexProgress>? progress, CancellationToken externalToken = default)
     {
+        // Prevent concurrent rebuilds — ignore a second Rebuild while one is running
+        if (IsRunning)
+        {
+            ErrorLog.AppendNote("RebuildIgnored", "Rebuild requested while indexing already running.");
+            return;
+        }
+
         _cts?.Cancel();
         try { _cts?.Dispose(); } catch { /* prior CTS may already be disposed */ }
         _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
@@ -47,11 +54,18 @@ public sealed class FileIndexer
         }
         catch (Exception ex)
         {
+            var logHint = $" See {ErrorLog.FileName} next to InstantFind.exe.";
             progress?.Report(new IndexProgress
             {
                 IsComplete = true,
-                Error = "Index failed: " + ex.Message
+                Error = "Index failed: " + ex.Message + logHint
             });
+            ErrorLog.AppendFailure(
+                "RunFullIndexAsync",
+                ex,
+                failedPath: _db.LastFailedFilePath ?? _db.DatabasePath,
+                liveDbPath: _db.DatabasePath,
+                rebuildDbPath: IndexDatabase.GetRebuildPath(_db.DatabasePath));
         }
         finally
         {
@@ -148,8 +162,17 @@ public sealed class FileIndexer
                         catch (Exception ex) when (IsSkippableContentException(ex))
                         {
                             // Locked / inaccessible content must not fail the whole rebuild
-                            Interlocked.Increment(ref skippedLocked);
+                            var n = Interlocked.Increment(ref skippedLocked);
                             localBatch.Clear();
+                            // Log first few sharing violations with path so Bradley can paste the log
+                            if (n <= 25 && IndexDatabase.IsSharingViolation(ex))
+                            {
+                                ErrorLog.AppendNote(
+                                    "ContentSharingViolation",
+                                    ex.Message,
+                                    path: dir,
+                                    skippedLocked: n);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -213,19 +236,60 @@ public sealed class FileIndexer
             rebuildDb.Dispose();
             rebuildDb = null;
 
+            if (finalSkipped > 0)
+            {
+                ErrorLog.AppendNote(
+                    "SoftSkipSummary",
+                    $"Rebuild soft-skipped {finalSkipped} locked/inaccessible content entries.",
+                    path: livePath,
+                    skippedLocked: finalSkipped);
+            }
+
             _db.Close();
             try
             {
-                _db.ReplaceWithRebuildFile(rebuildPath);
-                swapSucceeded = true;
+                try
+                {
+                    _db.ReplaceWithRebuildFile(rebuildPath);
+                    swapSucceeded = true;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Keep previous live index — do not hard-fail with a cryptic bare message
+                    ErrorLog.AppendFailure(
+                        "IndexDbSwap",
+                        ex,
+                        failedPath: _db.LastFailedFilePath ?? livePath,
+                        liveDbPath: livePath,
+                        rebuildDbPath: rebuildPath,
+                        skippedLocked: finalSkipped,
+                        extra: "Swap failed after retries; previous live index kept.");
+                    // Discard rebuild artifacts; live file untouched
+                    IndexDatabase.DiscardStaleRebuildArtifacts(livePath);
+                    progress?.Report(new IndexProgress
+                    {
+                        FilesIndexed = finalCount,
+                        DirectoriesScanned = Interlocked.Read(ref dirsScanned),
+                        SkippedLocked = finalSkipped,
+                        IsComplete = true,
+                        Error = "Index swap failed (database locked / in use). Previous index kept. "
+                                + $"Details in {ErrorLog.FileName} next to InstantFind.exe."
+                    });
+                    return;
+                }
             }
             finally
             {
                 // Always reopen live DB so search/watchers keep working
                 try { _db.Open(); }
-                catch
+                catch (Exception openEx)
                 {
-                    // Last resort: recreate empty schema
+                    ErrorLog.AppendFailure(
+                        "IndexDbReopen",
+                        openEx,
+                        failedPath: livePath,
+                        liveDbPath: livePath,
+                        rebuildDbPath: rebuildPath);
                     try { _db.Open(); } catch { }
                 }
             }
@@ -243,9 +307,16 @@ public sealed class FileIndexer
             CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
             throw;
         }
-        catch
+        catch (Exception ex)
         {
             CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
+            ErrorLog.AppendFailure(
+                "IndexCore",
+                ex,
+                failedPath: _db.LastFailedFilePath ?? livePath,
+                liveDbPath: livePath,
+                rebuildDbPath: rebuildPath,
+                skippedLocked: 0);
             // Ensure live DB is open for continued use
             try
             {

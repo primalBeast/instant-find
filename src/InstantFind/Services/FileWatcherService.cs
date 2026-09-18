@@ -14,6 +14,7 @@ public sealed class FileWatcherService : IDisposable
     private readonly object _debounceGate = new();
     private Timer? _debounceTimer;
     private int _pruneScheduled;
+    private int _paused;
     private const int DebounceMs = 350;
     // FileSystemWatcher max InternalBufferSize is 64 KiB on Windows.
     private const int WatcherBufferSize = 64 * 1024;
@@ -84,6 +85,25 @@ public sealed class FileWatcherService : IDisposable
             _watchers.Clear();
         }
     }
+
+    /// <summary>
+    /// Stop watchers and wait briefly for in-flight prune so the live DB is not busy during swap.
+    /// </summary>
+    public void PauseForRebuild()
+    {
+        Interlocked.Exchange(ref _paused, 1);
+        Stop();
+        for (int i = 0; i < 50 && Volatile.Read(ref _pruneScheduled) != 0; i++)
+            Thread.Sleep(20);
+    }
+
+    public void ResumeAfterRebuild(IEnumerable<string> roots)
+    {
+        Interlocked.Exchange(ref _paused, 0);
+        Start(roots);
+    }
+
+    private bool IsPaused => Volatile.Read(ref _paused) != 0;
 
     private void OnCreated(object sender, FileSystemEventArgs e) =>
         Safe(() =>
@@ -160,6 +180,7 @@ public sealed class FileWatcherService : IDisposable
     /// </summary>
     public void SchedulePrune(string? prefix)
     {
+        if (IsPaused) return;
         // Only one prune at a time
         if (Interlocked.CompareExchange(ref _pruneScheduled, 1, 0) != 0)
             return;
@@ -170,7 +191,9 @@ public sealed class FileWatcherService : IDisposable
             {
                 // Small delay to coalesce overflow bursts
                 Thread.Sleep(400);
+                if (IsPaused) return;
                 _db.PruneMissing(prefix);
+                if (IsPaused) return;
                 ScheduleIndexMutated();
             }
             catch
@@ -184,8 +207,9 @@ public sealed class FileWatcherService : IDisposable
         });
     }
 
-    private static void Safe(Action action)
+    private void Safe(Action action)
     {
+        if (IsPaused) return;
         try { action(); }
         catch { /* never crash UI from watcher callbacks */ }
     }

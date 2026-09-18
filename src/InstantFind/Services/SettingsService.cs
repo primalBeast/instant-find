@@ -78,13 +78,12 @@ public sealed class SettingsService
     private static AppSettings CreateDefaults()
     {
         var settings = new AppSettings();
-        // Default: local fixed/removable only — never Network mapped drives (v1.0.16)
+        // Default: physical local Fixed/Removable only — never Network, UNC, or cloud-mapped letters (v1.0.17)
         try
         {
             foreach (var drive in DriveInfo.GetDrives())
             {
-                if (!drive.IsReady) continue;
-                if (!DriveHelpers.IsIndexableDriveType(drive.DriveType))
+                if (!DriveHelpers.IsIndexableLocalDrive(drive))
                     continue;
                 settings.IndexedRoots.Add(drive.RootDirectory.FullName);
             }
@@ -117,7 +116,7 @@ public sealed class SettingsService
         if (settings.IndexedRoots is null)
             settings.IndexedRoots = new List<string>();
 
-        // Prune remote/mapped Network drives and UNC roots (v1.0.16)
+        // Prune Network / UNC / cloud-mapped letters (Google Drive, OneDrive, Dropbox) (v1.0.17)
         settings.IndexedRoots = DriveHelpers.FilterIndexableRoots(settings.IndexedRoots);
 
         // null EnabledDrives (pre-1.0.2) → enable all indexed drive letters
@@ -181,6 +180,22 @@ public sealed class SettingsService
 /// <summary>Helpers for drive-letter chips and path-prefix filters.</summary>
 public static class DriveHelpers
 {
+    private static readonly string[] CloudVolumeLabelTokens =
+    {
+        "google drive",
+        "google drive file stream",
+        "google drive for desktop",
+        "onedrive",
+        "dropbox",
+        "box",
+        "icloud",
+        "mega",
+        "pcloud",
+        "sugarync",
+        "nextcloud",
+        "seafile"
+    };
+
     public static List<string> GetDriveLetters(IEnumerable<string> roots)
     {
         var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -226,11 +241,147 @@ public static class DriveHelpers
     }
 
     /// <summary>
-    /// Local volumes we may index by default: Fixed and Removable.
-    /// Network (mapped letters) are never indexable.
+    /// Local volume types we may consider: Fixed and Removable.
+    /// Network / CD / RAM / unknown are never indexable by type alone.
     /// </summary>
     public static bool IsIndexableDriveType(DriveType type) =>
         type is DriveType.Fixed or DriveType.Removable;
+
+    /// <summary>
+    /// True for a drive we will index by default: ready Fixed/Removable that is not a
+    /// cloud / virtual provider volume (Google Drive, OneDrive, Dropbox, …).
+    /// DriveType.Network alone is not enough — Google Drive for desktop often reports Fixed.
+    /// </summary>
+    public static bool IsIndexableLocalDrive(DriveInfo drive)
+    {
+        if (drive is null) return false;
+        try
+        {
+            if (!drive.IsReady) return false;
+            if (!IsIndexableDriveType(drive.DriveType)) return false;
+            if (IsCloudVolume(drive)) return false;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Detect Google Drive / OneDrive / Dropbox (and similar) virtual volumes that report as Fixed.
+    /// Uses volume label tokens + root folder markers. Prefer excluding when uncertain cloud.
+    /// </summary>
+    public static bool IsCloudVolume(DriveInfo drive)
+    {
+        if (drive is null) return false;
+        try
+        {
+            string label = "";
+            try { label = drive.VolumeLabel ?? ""; } catch { label = ""; }
+            if (LooksLikeCloudVolumeLabel(label))
+                return true;
+
+            string root;
+            try { root = drive.RootDirectory.FullName; }
+            catch { return false; }
+
+            if (HasGoogleDriveRootMarkers(root))
+                return true;
+            if (HasDropboxRootMarkers(root))
+                return true;
+            if (HasOneDriveRootMarkers(root))
+                return true;
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Public for tests — volume label heuristic.</summary>
+    public static bool LooksLikeCloudVolumeLabel(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return false;
+        var lower = label.Trim().ToLowerInvariant();
+        foreach (var token in CloudVolumeLabelTokens)
+        {
+            if (lower.Contains(token, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Google Drive for desktop / File Stream root markers.</summary>
+    public static bool HasGoogleDriveRootMarkers(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        try
+        {
+            // Classic File Stream / desktop: G:\My Drive + G:\.shortcut-targets-by-id
+            var shortcut = Path.Combine(root, ".shortcut-targets-by-id");
+            var myDrive = Path.Combine(root, "My Drive");
+            var tmpDrive = Path.Combine(root, ".tmp.drivedownload");
+            var tmpUpload = Path.Combine(root, ".tmp.driveupload");
+            if (Directory.Exists(shortcut))
+                return true;
+            if (Directory.Exists(tmpDrive) || Directory.Exists(tmpUpload))
+                return true;
+            // "My Drive" alone is weak; require another GDrive marker or only a couple top entries
+            if (Directory.Exists(myDrive) && (Directory.Exists(shortcut) || Directory.Exists(tmpDrive)))
+                return true;
+            if (Directory.Exists(myDrive))
+            {
+                // Heuristic: root looks like GDrive when My Drive exists and no Windows/Program Files
+                var hasWindows = Directory.Exists(Path.Combine(root, "Windows"));
+                var hasProgramFiles = Directory.Exists(Path.Combine(root, "Program Files"));
+                if (!hasWindows && !hasProgramFiles)
+                    return true;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool HasDropboxRootMarkers(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        try
+        {
+            if (Directory.Exists(Path.Combine(root, ".dropbox")))
+                return true;
+            if (File.Exists(Path.Combine(root, ".dropbox")))
+                return true;
+            return false;
+        }
+        catch { return false; }
+    }
+
+    public static bool HasOneDriveRootMarkers(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        try
+        {
+            // Letter-mapped OneDrive is uncommon; marker folder + no Windows tree
+            var personal = Path.Combine(root, "OneDrive");
+            if (Directory.Exists(personal))
+            {
+                var hasWindows = Directory.Exists(Path.Combine(root, "Windows"));
+                if (!hasWindows)
+                    return true;
+            }
+            // Cloud Files placeholder directory sometimes present at root
+            if (Directory.Exists(Path.Combine(root, ".onedrive")))
+                return true;
+            return false;
+        }
+        catch { return false; }
+    }
 
     /// <summary>UNC share root/path (\\server\share\…).</summary>
     public static bool IsUncPath(string? path)
@@ -241,8 +392,7 @@ public static class DriveHelpers
     }
 
     /// <summary>
-    /// True for Network mapped drive letters or UNC paths.
-    /// Uses DriveInfo.DriveType when available; UNC always remote.
+    /// True for Network mapped letters, UNC, non-indexable DriveTypes, or cloud virtual volumes.
     /// </summary>
     public static bool IsRemoteRoot(string? path)
     {
@@ -253,10 +403,12 @@ public static class DriveHelpers
         {
             var root = Path.GetPathRoot(path.Trim());
             if (string.IsNullOrEmpty(root)) return false;
-            // UNC Path.GetPathRoot returns \\server\share\
             if (IsUncPath(root)) return true;
             var di = new DriveInfo(root);
-            return di.DriveType == DriveType.Network;
+            if (di.DriveType == DriveType.Network) return true;
+            if (!IsIndexableDriveType(di.DriveType)) return true;
+            if (IsCloudVolume(di)) return true;
+            return false;
         }
         catch
         {
@@ -264,7 +416,7 @@ public static class DriveHelpers
         }
     }
 
-    /// <summary>True when a drive letter like "G:" maps to DriveType.Network.</summary>
+    /// <summary>True when a drive letter like "G:" is Network or cloud-mapped.</summary>
     public static bool IsRemoteDriveLetter(string? letter)
     {
         if (string.IsNullOrWhiteSpace(letter)) return false;
@@ -277,7 +429,7 @@ public static class DriveHelpers
         return false;
     }
 
-    /// <summary>Drop Network / UNC roots from an IndexedRoots list.</summary>
+    /// <summary>Drop Network / UNC / cloud roots from an IndexedRoots list.</summary>
     public static List<string> FilterIndexableRoots(IEnumerable<string>? roots)
     {
         var result = new List<string>();
@@ -294,7 +446,7 @@ public static class DriveHelpers
         return result;
     }
 
-    /// <summary>Drop Network mapped letters from EnabledDrives.</summary>
+    /// <summary>Drop Network / cloud mapped letters from EnabledDrives.</summary>
     public static List<string> FilterIndexableDriveLetters(IEnumerable<string>? letters)
     {
         return NormalizeDriveLetters(letters)
@@ -304,7 +456,7 @@ public static class DriveHelpers
 
     public static bool IsRootEnabled(string root, IReadOnlyList<string>? enabledDrives)
     {
-        // Never treat remote/UNC as enabled for rebuild even if listed
+        // Never treat remote/UNC/cloud as enabled for rebuild even if listed
         if (IsRemoteRoot(root)) return false;
         var letter = TryGetDriveLetter(root);
         if (letter is null) return false; // non-drive non-UNC should not appear; refuse

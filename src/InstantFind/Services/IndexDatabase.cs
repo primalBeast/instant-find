@@ -25,7 +25,8 @@ public sealed class IndexDatabase : IDisposable
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            Cache = SqliteCacheMode.Shared,
+            DefaultTimeout = 5 // seconds; pairs with PRAGMA busy_timeout
         }.ToString();
     }
 
@@ -52,10 +53,31 @@ public sealed class IndexDatabase : IDisposable
         if (_connection is not null)
             return;
 
-        _connection = new SqliteConnection(_connectionString);
-        _connection.Open();
+        Exception? last = null;
+        for (int attempt = 1; attempt <= 8; attempt++)
+        {
+            try
+            {
+                var conn = new SqliteConnection(_connectionString);
+                conn.Open();
+                _connection = conn;
+                last = null;
+                break;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                       or Microsoft.Data.Sqlite.SqliteException)
+            {
+                last = ex;
+                try { Thread.Sleep(50 * attempt); } catch { }
+            }
+        }
+
+        if (_connection is null)
+            throw last ?? new IOException("Failed to open index database after retries: " + DatabasePath);
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
+            PRAGMA busy_timeout=5000;
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA temp_store=MEMORY;
@@ -127,21 +149,26 @@ public sealed class IndexDatabase : IDisposable
         }
     }
 
+    /// <summary>Path that last failed during Replace/Move/Delete (for error log).</summary>
+    public string? LastFailedFilePath { get; private set; }
+
     /// <summary>
     /// Atomically replace the live DB file with a successful rebuild DB.
     /// Caller must Close() this instance first; call Open() after.
-    /// Retries briefly on sharing violations (AV / indexer / leftover handles).
+    /// Retries on sharing violations (AV / second instance / leftover handles).
     /// </summary>
     public void ReplaceWithRebuildFile(string rebuildDatabasePath)
     {
         if (string.Equals(rebuildDatabasePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Rebuild path must differ from live database path.");
 
+        LastFailedFilePath = null;
+
         // Encourage release of any lingering native handles before file ops
         GC.Collect();
         GC.WaitForPendingFinalizers();
 
-        const int maxAttempts = 8;
+        const int maxAttempts = 10;
         Exception? last = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -157,35 +184,58 @@ public sealed class IndexDatabase : IDisposable
 
                 if (File.Exists(DatabasePath))
                 {
+                    LastFailedFilePath = DatabasePath;
                     File.Replace(rebuildDatabasePath, DatabasePath, backup, ignoreMetadataErrors: true);
                     TryDeleteSqliteFiles(backup);
                 }
                 else
                 {
+                    LastFailedFilePath = rebuildDatabasePath;
                     File.Move(rebuildDatabasePath, DatabasePath);
                 }
 
                 TryDeleteSqliteFiles(rebuildDatabasePath);
+                LastFailedFilePath = null;
                 return;
             }
             catch (IOException ex)
             {
                 last = ex;
-                // Brief backoff — never leave the UI hard-failed for a transient lock if we can recover
-                Thread.Sleep(50 * attempt * attempt);
+                // 50–200ms-ish backoff (capped); AV / second instance often releases quickly
+                var delay = Math.Min(200, 40 + 20 * attempt);
+                Thread.Sleep(delay);
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
             catch (UnauthorizedAccessException ex)
             {
                 last = ex;
-                Thread.Sleep(50 * attempt * attempt);
+                var delay = Math.Min(200, 40 + 20 * attempt);
+                Thread.Sleep(delay);
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
         }
 
-        throw last ?? new IOException("Failed to swap rebuild database after retries.");
+        var msg = $"Failed to swap rebuild database after {maxAttempts} retries"
+                  + (LastFailedFilePath is not null ? $": {LastFailedFilePath}" : ".");
+        throw last ?? new IOException(msg);
+    }
+
+    public static bool IsSharingViolation(Exception ex)
+    {
+        if (ex is IOException io)
+        {
+            // ERROR_SHARING_VIOLATION 32, ERROR_LOCK_VIOLATION 33
+            var hr = io.HResult & 0xFFFF;
+            if (hr is 32 or 33) return true;
+            var msg = io.Message ?? "";
+            if (msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (msg.Contains("sharing violation", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public void ClearAll()
@@ -849,7 +899,7 @@ public sealed class IndexDatabase : IDisposable
 
     private static void TryDelete(string path)
     {
-        for (int attempt = 1; attempt <= 4; attempt++)
+        for (int attempt = 1; attempt <= 8; attempt++)
         {
             try
             {
@@ -860,11 +910,11 @@ public sealed class IndexDatabase : IDisposable
             }
             catch (IOException)
             {
-                Thread.Sleep(25 * attempt);
+                Thread.Sleep(Math.Min(200, 25 * attempt));
             }
             catch (UnauthorizedAccessException)
             {
-                Thread.Sleep(25 * attempt);
+                Thread.Sleep(Math.Min(200, 25 * attempt));
             }
             catch
             {
