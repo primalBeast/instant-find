@@ -7,7 +7,7 @@ namespace InstantFind.Services;
 
 /// <summary>
 /// User-mode parallel indexer using Directory.EnumerateFileSystemEntries.
-/// Skips inaccessible directories. No drivers, no MFT/USN.
+/// Skips inaccessible / locked files and directories. No drivers, no MFT/USN.
 /// Full rebuilds write to a temporary DB and atomically swap on success so
 /// cancel/crash never leaves a tiny partial live index.
 /// </summary>
@@ -93,10 +93,12 @@ public sealed class FileIndexer
 
             long filesIndexed = 0;
             long dirsScanned = 0;
+            long skippedLocked = 0;
             var exclude = new HashSet<string>(_settings.ExcludedDirectoryNames, StringComparer.OrdinalIgnoreCase);
             var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings);
             var roots = _settings.IndexedRoots
                 .Where(Directory.Exists)
+                .Where(r => !DriveHelpers.IsRemoteRoot(r))
                 .Where(r => DriveHelpers.IsRootEnabled(r, _settings.EnabledDrives ?? new List<string>()))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -129,11 +131,12 @@ public sealed class FileIndexer
                         try
                         {
                             Interlocked.Increment(ref dirsScanned);
-                            EnumerateDirectory(dir, exclude, excludePrefixes, pending, localBatch, ref filesIndexed, progress, ct, rebuildDb);
+                            EnumerateDirectory(dir, exclude, excludePrefixes, pending, localBatch,
+                                ref filesIndexed, ref skippedLocked, progress, ct, rebuildDb);
 
                             if (localBatch.Count >= 200)
                             {
-                                rebuildDb.UpsertBatch(localBatch, ct);
+                                SoftUpsertBatch(rebuildDb, localBatch, ref skippedLocked, ct);
                                 localBatch.Clear();
                             }
                         }
@@ -141,6 +144,12 @@ public sealed class FileIndexer
                         {
                             localBatch.Clear();
                             break;
+                        }
+                        catch (Exception ex) when (IsSkippableContentException(ex))
+                        {
+                            // Locked / inaccessible content must not fail the whole rebuild
+                            Interlocked.Increment(ref skippedLocked);
+                            localBatch.Clear();
                         }
                         catch (Exception ex)
                         {
@@ -155,7 +164,7 @@ public sealed class FileIndexer
 
                     if (localBatch.Count > 0 && !ct.IsCancellationRequested)
                     {
-                        try { rebuildDb.UpsertBatch(localBatch, ct); }
+                        try { SoftUpsertBatch(rebuildDb, localBatch, ref skippedLocked, ct); }
                         catch (OperationCanceledException) { /* discard partial batch */ }
                     }
                 }
@@ -194,10 +203,12 @@ public sealed class FileIndexer
             progress?.Report(new IndexProgress
             {
                 Message = "Finalizing index…",
-                FilesIndexed = Interlocked.Read(ref filesIndexed)
+                FilesIndexed = Interlocked.Read(ref filesIndexed),
+                SkippedLocked = Interlocked.Read(ref skippedLocked)
             });
 
             var finalCount = Interlocked.Read(ref filesIndexed);
+            var finalSkipped = Interlocked.Read(ref skippedLocked);
             rebuildDb.Close();
             rebuildDb.Dispose();
             rebuildDb = null;
@@ -223,6 +234,7 @@ public sealed class FileIndexer
             {
                 FilesIndexed = finalCount,
                 DirectoriesScanned = Interlocked.Read(ref dirsScanned),
+                SkippedLocked = finalSkipped,
                 IsComplete = true
             });
         }
@@ -253,6 +265,59 @@ public sealed class FileIndexer
         IndexDatabase.DiscardStaleRebuildArtifacts(livePath);
     }
 
+    /// <summary>
+    /// Sharing-violation / access-denied / missing content — skip and continue crawl.
+    /// </summary>
+    public static bool IsSkippableContentException(Exception ex) =>
+        ex is UnauthorizedAccessException
+            or SecurityException
+            or IOException
+            or DirectoryNotFoundException
+            or FileNotFoundException
+            or PathTooLongException;
+
+    private static void SoftUpsertBatch(
+        IndexDatabase targetDb,
+        List<FileEntry> batch,
+        ref long skippedLocked,
+        CancellationToken ct)
+    {
+        if (batch.Count == 0) return;
+        try
+        {
+            targetDb.UpsertBatch(batch, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsSkippableContentException(ex))
+        {
+            // Rare: IO during batch write of content metadata path — skip entries
+            Interlocked.Add(ref skippedLocked, batch.Count);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Soft-fail individual rows rather than aborting the rebuild
+            foreach (var entry in batch)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    targetDb.UpsertBatch(new[] { entry }, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    Interlocked.Increment(ref skippedLocked);
+                }
+            }
+        }
+    }
+
     private void EnumerateDirectory(
         string dir,
         HashSet<string> exclude,
@@ -260,6 +325,7 @@ public sealed class FileIndexer
         ConcurrentQueue<string> pending,
         List<FileEntry> localBatch,
         ref long filesIndexed,
+        ref long skippedLocked,
         IProgress<IndexProgress>? progress,
         CancellationToken ct,
         IndexDatabase targetDb)
@@ -272,72 +338,126 @@ public sealed class FileIndexer
         {
             entries = Directory.EnumerateFileSystemEntries(dir);
         }
-        catch (UnauthorizedAccessException) { return; }
+        catch (UnauthorizedAccessException) { Interlocked.Increment(ref skippedLocked); return; }
         catch (DirectoryNotFoundException) { return; }
-        catch (IOException) { return; }
-        catch (SecurityException) { return; }
+        catch (IOException) { Interlocked.Increment(ref skippedLocked); return; }
+        catch (SecurityException) { Interlocked.Increment(ref skippedLocked); return; }
 
-        foreach (var entryPath in entries)
+        IEnumerator<string>? enumerator = null;
+        try
         {
-            if (ct.IsCancellationRequested) return;
+            enumerator = entries.GetEnumerator();
+        }
+        catch (Exception ex) when (IsSkippableContentException(ex))
+        {
+            Interlocked.Increment(ref skippedLocked);
+            return;
+        }
 
-            string name;
-            try { name = Path.GetFileName(entryPath); }
-            catch { continue; }
-
-            bool isDir;
-            try
+        using (enumerator)
+        {
+            while (true)
             {
-                var attrs = File.GetAttributes(entryPath);
-                // Skip directory reparse points to avoid cycles / junction storms
-                if ((attrs & FileAttributes.ReparsePoint) != 0 && (attrs & FileAttributes.Directory) != 0)
-                    continue;
-                isDir = (attrs & FileAttributes.Directory) != 0;
-            }
-            catch
-            {
-                continue;
-            }
+                if (ct.IsCancellationRequested) return;
 
-            if (isDir)
-            {
-                if (exclude.Contains(name))
-                    continue;
-                if (ExcludePaths.IsUnderAny(entryPath, excludePrefixes))
-                    continue;
-
-                pending.Enqueue(entryPath);
-
-                if (_settings.IncludeDirectories)
+                bool moved;
+                try
                 {
-                    var fe = TryCreateEntry(entryPath, name, isDirectory: true);
+                    moved = enumerator.MoveNext();
+                }
+                catch (Exception ex) when (IsSkippableContentException(ex))
+                {
+                    // Mid-enumeration sharing violation — skip rest of this directory
+                    Interlocked.Increment(ref skippedLocked);
+                    return;
+                }
+
+                if (!moved) break;
+
+                string entryPath;
+                try { entryPath = enumerator.Current; }
+                catch (Exception ex) when (IsSkippableContentException(ex))
+                {
+                    Interlocked.Increment(ref skippedLocked);
+                    continue;
+                }
+
+                string name;
+                try { name = Path.GetFileName(entryPath); }
+                catch
+                {
+                    Interlocked.Increment(ref skippedLocked);
+                    continue;
+                }
+
+                bool isDir;
+                try
+                {
+                    var attrs = File.GetAttributes(entryPath);
+                    // Skip directory reparse points to avoid cycles / junction storms
+                    if ((attrs & FileAttributes.ReparsePoint) != 0 && (attrs & FileAttributes.Directory) != 0)
+                        continue;
+                    isDir = (attrs & FileAttributes.Directory) != 0;
+                }
+                catch (Exception ex) when (IsSkippableContentException(ex))
+                {
+                    Interlocked.Increment(ref skippedLocked);
+                    continue;
+                }
+                catch
+                {
+                    Interlocked.Increment(ref skippedLocked);
+                    continue;
+                }
+
+                if (isDir)
+                {
+                    if (exclude.Contains(name))
+                        continue;
+                    if (ExcludePaths.IsUnderAny(entryPath, excludePrefixes))
+                        continue;
+
+                    pending.Enqueue(entryPath);
+
+                    if (_settings.IncludeDirectories)
+                    {
+                        var fe = TryCreateEntry(entryPath, name, isDirectory: true);
+                        if (fe is not null)
+                        {
+                            localBatch.Add(fe);
+                            Report(ref filesIndexed, dir, progress, ref skippedLocked);
+                        }
+                        else
+                        {
+                            Interlocked.Increment(ref skippedLocked);
+                        }
+                    }
+                }
+                else
+                {
+                    var fe = TryCreateEntry(entryPath, name, isDirectory: false);
                     if (fe is not null)
                     {
                         localBatch.Add(fe);
-                        Report(ref filesIndexed, dir, progress);
+                        Report(ref filesIndexed, dir, progress, ref skippedLocked);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref skippedLocked);
                     }
                 }
-            }
-            else
-            {
-                var fe = TryCreateEntry(entryPath, name, isDirectory: false);
-                if (fe is not null)
+
+                // Flush mid-directory if batch is large so cancel isn't blocked long
+                if (localBatch.Count >= 200)
                 {
-                    localBatch.Add(fe);
-                    Report(ref filesIndexed, dir, progress);
+                    SoftUpsertBatch(targetDb, localBatch, ref skippedLocked, ct);
+                    localBatch.Clear();
                 }
             }
-        }
-
-        // Flush mid-directory if batch is large so cancel isn't blocked long
-        if (localBatch.Count >= 200)
-        {
-            targetDb.UpsertBatch(localBatch, ct);
-            localBatch.Clear();
         }
     }
 
-    private static void Report(ref long filesIndexed, string dir, IProgress<IndexProgress>? progress)
+    private static void Report(ref long filesIndexed, string dir, IProgress<IndexProgress>? progress, ref long skippedLocked)
     {
         var count = Interlocked.Increment(ref filesIndexed);
         if (count == 1 || count % 500 == 0)
@@ -346,12 +466,13 @@ public sealed class FileIndexer
             {
                 CurrentPath = dir,
                 FilesIndexed = count,
+                SkippedLocked = Interlocked.Read(ref skippedLocked),
                 IsComplete = false
             });
         }
     }
 
-    internal static FileEntry? TryCreateEntry(string fullPath, string name, bool isDirectory)
+    public static FileEntry? TryCreateEntry(string fullPath, string name, bool isDirectory)
     {
         try
         {
@@ -399,6 +520,9 @@ public sealed class FileIndexer
     {
         try
         {
+            if (DriveHelpers.IsRemoteRoot(path))
+                return;
+
             if (Directory.Exists(path))
             {
                 var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -416,7 +540,7 @@ public sealed class FileIndexer
         }
         catch
         {
-            // ignore inaccessible
+            // ignore inaccessible / locked
         }
     }
 }

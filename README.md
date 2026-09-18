@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.15) | https://github.com/primalBeast/instant-find/releases/download/v1.0.15/InstantFind-win-x64.zip |
+| Direct zip (v1.0.16) | https://github.com/primalBeast/instant-find/releases/download/v1.0.16/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -38,9 +38,14 @@ Settings and the index database live under:
   index-rebuild.db   (temp during rebuild; discarded if leftover)
 ```
 
+**Indexed roots**: only local Fixed/Removable volumes. Mapped network drives and UNC paths are not indexed (pruned from `indexedRoots` on load if present from an older version).
+
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.15)
+## Features (v1.0.16)
+
+- **Skip locked files (v1.0.16)**: Rebuild no longer hard-fails when a content file is locked (`IOException` / sharing violation / access denied). Crawl skips those entries and continues; status can show `skipped N locked`. SQLite live/rebuild swap retries briefly with backoff after connections are closed + WAL checkpointed.
+- **No network / mapped drives (v1.0.16)**: Defaults, EnsureDefaults, Rebuild, and drive chips exclude `DriveType.Network` mapped letters (e.g. G:, M:) and UNC roots (`\\server\share`). Previously saved network roots are pruned from `IndexedRoots` / `EnabledDrives` on load. Local Fixed (and Removable) only — Crowdstrike-safe user-mode.
 
 - **Exclude (v1.0.15)**: Filter popup → Exclude. Common folders with checkboxes (defaults: Windows, Program Files, Recycle Bin, System Volume Information, Recovery) plus custom folders via **+**. Search hides them; rebuild skips them.
 
@@ -90,12 +95,12 @@ Settings and the index database live under:
   - Path term: leading `\` (e.g. `\72`) matches path segments that start with the rest
   - Filter popup (search bar) for size / date / type / saved filters
 - Parallel multi-root indexing with progress status
-- Skips inaccessible directories instead of failing
+- Skips inaccessible / locked files and directories instead of failing the whole rebuild (v1.0.16)
 - **Size & Date Modified (v1.0.6)**: shown from the **SQLite index** (set at crawl / FileWatcher `IndexSinglePath`), not live disk on every search. Silent refresh and re-search now update Size/Modified **in place** when paths are unchanged but metadata changed (so the grid repaints without clearing selection / context menu)
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.15)
+## Query syntax (v1.0.16)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -137,8 +142,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.15 && git push origin v1.0.15`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.15`
+1. **Tag** — push a version tag: `git tag v1.0.16 && git push origin v1.0.16`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.16`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

@@ -110,39 +110,82 @@ public sealed class IndexDatabase : IDisposable
     {
         lock (_writeLock)
         {
-            _connection?.Dispose();
-            _connection = null;
+            if (_connection is not null)
+            {
+                try
+                {
+                    // Flush WAL so the main file is consistent and locks release before swap/delete
+                    using var cmd = _connection.CreateCommand();
+                    cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                    cmd.ExecuteNonQuery();
+                }
+                catch { /* best-effort */ }
+
+                try { _connection.Dispose(); } catch { }
+                _connection = null;
+            }
         }
     }
 
     /// <summary>
     /// Atomically replace the live DB file with a successful rebuild DB.
     /// Caller must Close() this instance first; call Open() after.
+    /// Retries briefly on sharing violations (AV / indexer / leftover handles).
     /// </summary>
     public void ReplaceWithRebuildFile(string rebuildDatabasePath)
     {
         if (string.Equals(rebuildDatabasePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Rebuild path must differ from live database path.");
 
-        // Drop WAL/SHM sidecars so the main file is consistent before swap.
-        TryDeleteSidecars(DatabasePath);
-        TryDeleteSidecars(rebuildDatabasePath);
+        // Encourage release of any lingering native handles before file ops
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
 
-        var dir = Path.GetDirectoryName(DatabasePath)!;
-        var backup = Path.Combine(dir, "index.db.bak");
-        TryDeleteSqliteFiles(backup);
-
-        if (File.Exists(DatabasePath))
+        const int maxAttempts = 8;
+        Exception? last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            File.Replace(rebuildDatabasePath, DatabasePath, backup, ignoreMetadataErrors: true);
-            TryDeleteSqliteFiles(backup);
-        }
-        else
-        {
-            File.Move(rebuildDatabasePath, DatabasePath);
+            try
+            {
+                // Drop WAL/SHM sidecars so the main file is consistent before swap.
+                TryDeleteSidecars(DatabasePath);
+                TryDeleteSidecars(rebuildDatabasePath);
+
+                var dir = Path.GetDirectoryName(DatabasePath)!;
+                var backup = Path.Combine(dir, "index.db.bak");
+                TryDeleteSqliteFiles(backup);
+
+                if (File.Exists(DatabasePath))
+                {
+                    File.Replace(rebuildDatabasePath, DatabasePath, backup, ignoreMetadataErrors: true);
+                    TryDeleteSqliteFiles(backup);
+                }
+                else
+                {
+                    File.Move(rebuildDatabasePath, DatabasePath);
+                }
+
+                TryDeleteSqliteFiles(rebuildDatabasePath);
+                return;
+            }
+            catch (IOException ex)
+            {
+                last = ex;
+                // Brief backoff — never leave the UI hard-failed for a transient lock if we can recover
+                Thread.Sleep(50 * attempt * attempt);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                last = ex;
+                Thread.Sleep(50 * attempt * attempt);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
         }
 
-        TryDeleteSqliteFiles(rebuildDatabasePath);
+        throw last ?? new IOException("Failed to swap rebuild database after retries.");
     }
 
     public void ClearAll()
@@ -806,14 +849,27 @@ public sealed class IndexDatabase : IDisposable
 
     private static void TryDelete(string path)
     {
-        try
+        for (int attempt = 1; attempt <= 4; attempt++)
         {
-            if (File.Exists(path))
+            try
+            {
+                if (!File.Exists(path))
+                    return;
                 File.Delete(path);
-        }
-        catch
-        {
-            // Best-effort cleanup
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(25 * attempt);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Thread.Sleep(25 * attempt);
+            }
+            catch
+            {
+                return; // Best-effort cleanup
+            }
         }
     }
 

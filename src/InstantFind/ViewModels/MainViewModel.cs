@@ -127,7 +127,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             StatusText = $"Ready — {count:N0} items indexed";
             // Watchers stay on IndexedRoots — no new per-drive watchers when chips toggle
-            _watcher.Start(_settings.IndexedRoots);
+            _watcher.Start(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
         }
         else if (_settings.StartIndexingOnLaunch)
         {
@@ -462,12 +462,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void InitDriveChips()
     {
-        var letters = DriveHelpers.GetDriveLetters(_settings.IndexedRoots);
+        // Never offer network mapped letters for indexing (v1.0.16)
+        var letters = DriveHelpers.FilterIndexableDriveLetters(
+            DriveHelpers.GetDriveLetters(_settings.IndexedRoots));
         if (letters.Count == 0 && _settings.EnabledDrives is { Count: > 0 })
-            letters = DriveHelpers.NormalizeDriveLetters(_settings.EnabledDrives);
+            letters = DriveHelpers.FilterIndexableDriveLetters(_settings.EnabledDrives);
 
         var enabledSet = new HashSet<string>(
-            DriveHelpers.NormalizeDriveLetters(_settings.EnabledDrives ?? new List<string>()),
+            DriveHelpers.FilterIndexableDriveLetters(_settings.EnabledDrives ?? new List<string>()),
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var letter in letters)
@@ -888,11 +890,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 IsIndexing = false;
                 if (p.Error is not null)
                     StatusText = p.Error;
+                else if (p.SkippedLocked > 0)
+                    StatusText = $"Indexed {p.FilesIndexed:N0} items (skipped {p.SkippedLocked:N0} locked)";
                 else
                     StatusText = $"Indexed {p.FilesIndexed:N0} items";
 
                 // Always restart watchers — including cancel (previous index kept)
-                _watcher.Start(_settings.IndexedRoots);
+                _watcher.Start(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
 
                 if (p.Error is null)
                     _ = RunSearchAsync();
@@ -909,7 +913,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             IsIndexing = false;
             StatusText = "Index failed: " + ex.Message;
-            _watcher.Start(_settings.IndexedRoots);
+            _watcher.Start(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
         }
     }
 

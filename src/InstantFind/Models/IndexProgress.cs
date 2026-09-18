@@ -5,6 +5,7 @@ public sealed class IndexProgress
     public string CurrentPath { get; init; } = string.Empty;
     public long FilesIndexed { get; init; }
     public long DirectoriesScanned { get; init; }
+    public long SkippedLocked { get; init; }
     public bool IsComplete { get; init; }
     public string? Error { get; init; }
 
@@ -17,11 +18,12 @@ public sealed class IndexProgress
         {
             if (Message is not null)
                 return Message;
+            var skip = SkippedLocked > 0 ? $" (skipped {SkippedLocked:N0} locked)" : "";
             if (IsComplete)
-                return $"Indexed {FilesIndexed:N0} items";
+                return $"Indexed {FilesIndexed:N0} items{skip}";
             if (string.IsNullOrEmpty(CurrentPath))
-                return $"Scanning… {FilesIndexed:N0} items";
-            return $"Scanning… {FilesIndexed:N0} items — {CurrentPath}";
+                return $"Scanning… {FilesIndexed:N0} items{skip}";
+            return $"Scanning… {FilesIndexed:N0} items{skip} — {CurrentPath}";
         }
     }
 }

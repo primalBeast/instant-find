@@ -44,7 +44,16 @@ public sealed class SettingsService
                 var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
                 if (settings is not null)
                 {
+                    var rootsBefore = settings.IndexedRoots?.Count ?? -1;
+                    var drivesBefore = settings.EnabledDrives?.Count ?? -1;
                     EnsureDefaults(settings);
+                    // Persist pruned Network/UNC roots so chips and rebuild stay local
+                    var rootsAfter = settings.IndexedRoots?.Count ?? 0;
+                    var drivesAfter = settings.EnabledDrives?.Count ?? 0;
+                    if (rootsAfter != rootsBefore || drivesAfter != drivesBefore)
+                    {
+                        Save(settings);
+                    }
                     return settings;
                 }
             }
@@ -69,16 +78,15 @@ public sealed class SettingsService
     private static AppSettings CreateDefaults()
     {
         var settings = new AppSettings();
-        // Default: all fixed drives the current user can see (no admin)
+        // Default: local fixed/removable only — never Network mapped drives (v1.0.16)
         try
         {
             foreach (var drive in DriveInfo.GetDrives())
             {
                 if (!drive.IsReady) continue;
-                if (drive.DriveType is DriveType.Fixed or DriveType.Removable or DriveType.Network)
-                {
-                    settings.IndexedRoots.Add(drive.RootDirectory.FullName);
-                }
+                if (!DriveHelpers.IsIndexableDriveType(drive.DriveType))
+                    continue;
+                settings.IndexedRoots.Add(drive.RootDirectory.FullName);
             }
         }
         catch
@@ -109,11 +117,17 @@ public sealed class SettingsService
         if (settings.IndexedRoots is null)
             settings.IndexedRoots = new List<string>();
 
+        // Prune remote/mapped Network drives and UNC roots (v1.0.16)
+        settings.IndexedRoots = DriveHelpers.FilterIndexableRoots(settings.IndexedRoots);
+
         // null EnabledDrives (pre-1.0.2) → enable all indexed drive letters
         if (settings.EnabledDrives is null)
             settings.EnabledDrives = DriveHelpers.GetDriveLetters(settings.IndexedRoots);
         else
             settings.EnabledDrives = DriveHelpers.NormalizeDriveLetters(settings.EnabledDrives);
+
+        // Drop network mapped letters from chips / rebuild enable set
+        settings.EnabledDrives = DriveHelpers.FilterIndexableDriveLetters(settings.EnabledDrives);
 
         if (settings.OpenWithFavorites is null)
             settings.OpenWithFavorites = new List<string>();
@@ -211,10 +225,89 @@ public static class DriveHelpers
         return null;
     }
 
+    /// <summary>
+    /// Local volumes we may index by default: Fixed and Removable.
+    /// Network (mapped letters) are never indexable.
+    /// </summary>
+    public static bool IsIndexableDriveType(DriveType type) =>
+        type is DriveType.Fixed or DriveType.Removable;
+
+    /// <summary>UNC share root/path (\\server\share\…).</summary>
+    public static bool IsUncPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var p = path.Trim().Replace('/', '\\');
+        return p.StartsWith(@"\\", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// True for Network mapped drive letters or UNC paths.
+    /// Uses DriveInfo.DriveType when available; UNC always remote.
+    /// </summary>
+    public static bool IsRemoteRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (IsUncPath(path)) return true;
+
+        try
+        {
+            var root = Path.GetPathRoot(path.Trim());
+            if (string.IsNullOrEmpty(root)) return false;
+            // UNC Path.GetPathRoot returns \\server\share\
+            if (IsUncPath(root)) return true;
+            var di = new DriveInfo(root);
+            return di.DriveType == DriveType.Network;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>True when a drive letter like "G:" maps to DriveType.Network.</summary>
+    public static bool IsRemoteDriveLetter(string? letter)
+    {
+        if (string.IsNullOrWhiteSpace(letter)) return false;
+        var t = letter.Trim().TrimEnd('\\', '/');
+        if (t.Length >= 1 && char.IsLetter(t[0]))
+        {
+            var root = char.ToUpperInvariant(t[0]) + @":\";
+            return IsRemoteRoot(root);
+        }
+        return false;
+    }
+
+    /// <summary>Drop Network / UNC roots from an IndexedRoots list.</summary>
+    public static List<string> FilterIndexableRoots(IEnumerable<string>? roots)
+    {
+        var result = new List<string>();
+        if (roots is null) return result;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in roots)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var r = raw.Trim();
+            if (IsRemoteRoot(r)) continue;
+            if (!seen.Add(r)) continue;
+            result.Add(r);
+        }
+        return result;
+    }
+
+    /// <summary>Drop Network mapped letters from EnabledDrives.</summary>
+    public static List<string> FilterIndexableDriveLetters(IEnumerable<string>? letters)
+    {
+        return NormalizeDriveLetters(letters)
+            .Where(l => !IsRemoteDriveLetter(l))
+            .ToList();
+    }
+
     public static bool IsRootEnabled(string root, IReadOnlyList<string>? enabledDrives)
     {
+        // Never treat remote/UNC as enabled for rebuild even if listed
+        if (IsRemoteRoot(root)) return false;
         var letter = TryGetDriveLetter(root);
-        if (letter is null) return true; // non-drive paths (UNC) stay included when listed as roots
+        if (letter is null) return false; // non-drive non-UNC should not appear; refuse
         if (enabledDrives is null || enabledDrives.Count == 0)
             return false;
         return enabledDrives.Any(d => d.Equals(letter, StringComparison.OrdinalIgnoreCase));
