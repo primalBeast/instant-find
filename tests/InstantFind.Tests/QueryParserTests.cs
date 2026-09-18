@@ -829,7 +829,7 @@ public class QueryParserTests
     {
         var q = QueryParser.Parse("\"annual report\"");
         // Filename that happens to contain " must not be required / must not falsely help
-        Assert.False(QueryParser.Matches(q, "ann\"ual report.txt", @"C:\docs\ann\"ual report.txt", "txt"));
+        Assert.False(QueryParser.Matches(q, "ann\"ual report.txt", @"C:\docs\ann""ual report.txt", "txt"));
         Assert.True(QueryParser.Matches(q, "annual report.txt", @"C:\docs\annual report.txt", "txt"));
     }
 
@@ -871,7 +871,7 @@ public class QueryParserTests
         var q = QueryParser.Parse("\"foo\\\"bar\"");
         Assert.Single(q.Terms);
         Assert.Equal("foo\"bar", q.Terms[0]);
-        Assert.True(QueryParser.Matches(q, "foo\"bar.txt", @"C:\docs\foo\"bar.txt", "txt"));
+        Assert.True(QueryParser.Matches(q, "foo\"bar.txt", @"C:\docs\foo""bar.txt", "txt"));
         Assert.False(QueryParser.Matches(q, "foobar.txt", @"C:\docs\foobar.txt", "txt"));
     }
 
