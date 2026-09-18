@@ -876,16 +876,18 @@ public static class QueryParser
                 continue;
             }
             if (sb.Length > 0) sb.Append(' ');
-            // Re-quote tokens that contain spaces
+            // Re-emit for a later Tokenize pass: escape \ and " so phrase
+            // contents (including literal quotes) survive the round-trip.
+            var escaped = EscapeForRetokenize(token);
             if (token.Contains(' '))
             {
                 sb.Append('"');
-                sb.Append(token);
+                sb.Append(escaped);
                 sb.Append('"');
             }
             else
             {
-                sb.Append(token);
+                sb.Append(escaped);
             }
         }
         return sb.ToString().Trim();
@@ -1123,6 +1125,11 @@ public static class QueryParser
         if ((attrs & System.IO.FileAttributes.ReparsePoint) != 0) sb.Append('L');
         return sb.ToString();
     }
+
+
+    /// <summary>Escape <c>\</c> and <c>"</c> so a token can be Tokenize'd again safely.</summary>
+    private static string EscapeForRetokenize(string token)
+        => token.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     /// <summary>
     /// Splits on whitespace outside double quotes. Quote characters are delimiters only
