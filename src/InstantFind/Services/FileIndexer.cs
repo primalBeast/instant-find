@@ -480,12 +480,16 @@ public sealed class FileIndexer
             long size = 0;
             if (isDirectory)
             {
+                if (!Directory.Exists(fullPath))
+                    return null;
                 modified = Directory.GetLastWriteTimeUtc(fullPath);
             }
             else
             {
                 var info = new FileInfo(fullPath);
-                size = info.Exists ? info.Length : 0;
+                if (!info.Exists)
+                    return null;
+                size = info.Length;
                 modified = info.LastWriteTimeUtc;
             }
 
