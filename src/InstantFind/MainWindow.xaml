@@ -159,7 +159,7 @@
               Content="?"
               Click="HelpButton_Click"
               Width="32" Height="32"
-              Margin="0,0,8,0"
+              Margin="0,0,12,0"
               FontSize="14" FontWeight="Bold"
               VerticalAlignment="Center"
               Cursor="Hand"
@@ -192,11 +192,16 @@
       </Button>
       <Button Grid.Column="3"
               Style="{StaticResource ChromeButtonStyle}"
-              Content="—"
-              FontSize="18"
               ToolTip="Minimize"
               Click="MinimizeButton_Click"
-              shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+              shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <!-- Segoe MDL2 ChromeMinimize (E921): same visual weight as maximize □ (~10–12px), centered -->
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   Text="&#xE921;"
+                   FontSize="10"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"/>
+      </Button>
       <Button Grid.Column="4"
               Style="{StaticResource ChromeButtonStyle}"
               ToolTip="Maximize"
@@ -238,28 +243,15 @@
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
-          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
-        <Button Grid.Column="0"
-                Content="✕"
-                Command="{Binding ClearQueryCommand}"
-                Width="20" Height="20"
-                Margin="0,0,4,0"
-                FontSize="10" FontWeight="Bold"
-                Foreground="#E81123"
-                Background="Transparent"
-                BorderThickness="0"
-                Cursor="Hand"
-                ToolTip="Clear search"
-                VerticalAlignment="Center"/>
-
-        <ToggleButton Grid.Column="1"
+        <ToggleButton Grid.Column="0"
                       Content="Aa"
                       IsChecked="{Binding MatchCase}"
                       MinWidth="26" Height="22"
@@ -276,7 +268,7 @@
                       Cursor="Hand"
                       VerticalAlignment="Center"/>
 
-        <ToggleButton Grid.Column="2"
+        <ToggleButton Grid.Column="1"
                       Content="W"
                       IsChecked="{Binding WholeWord}"
                       MinWidth="24" Height="22"
@@ -293,7 +285,7 @@
                       Cursor="Hand"
                       VerticalAlignment="Center"/>
 
-        <ToggleButton Grid.Column="3"
+        <ToggleButton Grid.Column="2"
                       Content=".*"
                       IsChecked="{Binding UseRegex}"
                       MinWidth="28" Height="22"
@@ -312,7 +304,7 @@
                       VerticalAlignment="Center"/>
 
         <TextBox x:Name="SearchBox"
-                 Grid.Column="4"
+                 Grid.Column="3"
                  Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                  FontSize="16"
                  Background="Transparent"
@@ -321,6 +313,20 @@
                  CaretBrush="{StaticResource FgBrush}"
                  VerticalContentAlignment="Center"
                  Margin="0,0,8,0"/>
+
+        <!-- Clear immediately left of Filter: search → … → × · Filter · And/Or · spinner -->
+        <Button Grid.Column="4"
+                Content="✕"
+                Command="{Binding ClearQueryCommand}"
+                Width="20" Height="20"
+                Margin="0,0,4,0"
+                FontSize="10" FontWeight="Bold"
+                Foreground="#E81123"
+                Background="Transparent"
+                BorderThickness="0"
+                Cursor="Hand"
+                ToolTip="Clear search."
+                VerticalAlignment="Center"/>
 
         <!-- Filter button + anchored popup (left of And/Or) -->
         <Grid Grid.Column="5" VerticalAlignment="Center" Margin="0,0,8,0">
@@ -356,7 +362,8 @@
                  StaysOpen="False"
                  AllowsTransparency="True"
                  PopupAnimation="Fade">
-            <Border Background="{StaticResource PanelBrush}"
+            <Border x:Name="FilterPopupBorder"
+                    Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="4"
@@ -387,6 +394,14 @@
                   <TextBlock Text="Size" FontWeight="SemiBold" FontSize="11"
                              Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                   <WrapPanel Margin="0,0,0,10">
+                    <Button Content="&lt; 100 KB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&lt;100kb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="1–10 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="1mb..10mb"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
                     <Button Content="&gt; 1 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&gt;1mb"
                             Margin="0,0,6,6" Padding="8,3" FontSize="11"
                             Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
@@ -399,20 +414,16 @@
                             Margin="0,0,6,6" Padding="8,3" FontSize="11"
                             Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
                             BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
-                    <Button Content="&lt; 100 KB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="&lt;100kb"
-                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
-                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
-                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
-                    <Button Content="1–10 MB" Command="{Binding ApplySizeFilterCommand}" CommandParameter="1mb..10mb"
-                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
-                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
-                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
                   </WrapPanel>
 
                   <TextBlock Text="Date modified" FontWeight="SemiBold" FontSize="11"
                              Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                   <WrapPanel Margin="0,0,0,10">
                     <Button Content="Today" Command="{Binding ApplyDateFilterCommand}" CommandParameter="today"
+                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
+                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
+                    <Button Content="Yesterday" Command="{Binding ApplyDateFilterCommand}" CommandParameter="yesterday"
                             Margin="0,0,6,6" Padding="8,3" FontSize="11"
                             Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
                             BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
@@ -425,10 +436,6 @@
                             Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
                             BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
                     <Button Content="This year" Command="{Binding ApplyDateFilterCommand}" CommandParameter="thisyear"
-                            Margin="0,0,6,6" Padding="8,3" FontSize="11"
-                            Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
-                            BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
-                    <Button Content="Yesterday" Command="{Binding ApplyDateFilterCommand}" CommandParameter="yesterday"
                             Margin="0,0,6,6" Padding="8,3" FontSize="11"
                             Background="{StaticResource BgBrush}" Foreground="{StaticResource FgBrush}"
                             BorderBrush="{StaticResource BorderBrush}" Cursor="Hand"/>
@@ -460,6 +467,11 @@
                     <TextBlock Text="Exclude" FontWeight="SemiBold" FontSize="11"
                                Foreground="{StaticResource MutedBrush}"
                                VerticalAlignment="Center"/>
+                  </DockPanel>
+                  <DockPanel Margin="0,0,0,4">
+                    <TextBlock Text="Your folders" FontSize="10"
+                               Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center"/>
                     <Button DockPanel.Dock="Right"
                             Content="+"
                             Command="{Binding AddCustomExcludeCommand}"
@@ -469,22 +481,7 @@
                             BorderThickness="0" Cursor="Hand"
                             ToolTip="Add a folder to exclude"/>
                   </DockPanel>
-                  <TextBlock Text="Common folders" FontSize="10"
-                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                  <ItemsControl ItemsSource="{Binding CommonExcludes}" Margin="0,0,0,8">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                                  Content="{Binding Label}"
-                                  Margin="0,0,0,3"
-                                  FontSize="11"
-                                  Foreground="{StaticResource FgBrush}"/>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                  <TextBlock Text="Your folders" FontSize="10"
-                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                  <ItemsControl ItemsSource="{Binding CustomExcludePaths}" Margin="0,0,0,10">
+                  <ItemsControl ItemsSource="{Binding CustomExcludePaths}" Margin="0,0,0,8">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
                         <DockPanel Margin="0,0,0,4">
@@ -500,6 +497,19 @@
                                      VerticalAlignment="Center"
                                      ToolTip="{Binding}"/>
                         </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Text="Common folders" FontSize="10"
+                             Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                  <ItemsControl ItemsSource="{Binding CommonExcludes}" Margin="0,0,0,10">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                  Content="{Binding Label}"
+                                  Margin="0,0,0,3"
+                                  FontSize="11"
+                                  Foreground="{StaticResource FgBrush}"/>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -719,6 +729,7 @@
         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
                      Opened="ResultsContextMenu_Opened"
                      Closed="ResultsContextMenu_Closed">
+          <!-- 1. Open · Open containing folder · Open with… -->
           <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
           <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
           <MenuItem Header="Open with…">
@@ -737,10 +748,17 @@
             <Separator/>
             <MenuItem Header="Choose another app…" Command="{Binding ChooseOpenWithAppCommand}"/>
           </MenuItem>
+          <Separator/>
+          <!-- 2. Copy full path · Copy containing path -->
+          <MenuItem Header="Copy full path" Command="{Binding CopyFullPathCommand}"/>
+          <MenuItem Header="Copy containing path" Command="{Binding CopyContainingPathCommand}"/>
+          <Separator/>
+          <!-- 3. Edit with Notepad++ · Open in Cmd · Open in Git Bash -->
           <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
           <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
           <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>
           <Separator/>
+          <!-- 4. Show Extension · Show Attributes -->
           <MenuItem Header="Show Extension column"
                     IsCheckable="True"
                     IsChecked="{Binding ShowExtensionColumn, Mode=TwoWay}"/>

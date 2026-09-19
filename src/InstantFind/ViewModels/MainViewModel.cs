@@ -37,6 +37,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _silentRefreshPending;
     private FileEntry? _contextTarget;
     private bool _isFilterPopupOpen;
+    private bool _suppressExcludeSync;
     private bool _showExtensionColumn;
     private bool _showAttributesColumn;
     private string _newFilterName = string.Empty;
@@ -76,7 +77,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ExcludePaths.CommonCatalog.Select(c =>
             {
                 var item = new CommonExcludeItem(c.Id, c.Label, checkedIds.Contains(c.Id));
-                item.Changed += (_, _) => OnCommonExcludeChanged();
+                item.Changed += (s, _) => OnCommonExcludeItemChanged(s as CommonExcludeItem);
                 return item;
             }));
         _showExtensionColumn = _settings.ShowExtensionColumn;
@@ -119,6 +120,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DeleteSavedFilterCommand = new RelayCommand(p => DeleteSavedFilter(p as SavedFilter));
         AddCustomExcludeCommand = new RelayCommand(_ => AddCustomExclude());
         RemoveCustomExcludeCommand = new RelayCommand(p => RemoveCustomExclude(p as string));
+        CopyFullPathCommand = new RelayCommand(_ => CopyFullPath(), _ => ActionTarget is not null);
+        CopyContainingPathCommand = new RelayCommand(_ => CopyContainingPath(), _ => ActionTarget is not null);
         ToggleExtensionColumnCommand = new RelayCommand(_ => ShowExtensionColumn = !ShowExtensionColumn);
         ToggleAttributesColumnCommand = new RelayCommand(_ => ShowAttributesColumn = !ShowAttributesColumn);
 
@@ -361,6 +364,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand DeleteSavedFilterCommand { get; }
     public ICommand AddCustomExcludeCommand { get; }
     public ICommand RemoveCustomExcludeCommand { get; }
+    public ICommand CopyFullPathCommand { get; }
+    public ICommand CopyContainingPathCommand { get; }
     public ICommand ToggleExtensionColumnCommand { get; }
     public ICommand ToggleAttributesColumnCommand { get; }
 
@@ -602,7 +607,64 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PersistSettings();
     }
 
-    private void OnCommonExcludeChanged()
+    private void OnCommonExcludeItemChanged(CommonExcludeItem? item)
+    {
+        if (_suppressExcludeSync || item is null)
+            return;
+
+        var catalog = ExcludePaths.CommonCatalog.FirstOrDefault(c => c.Id == item.Id);
+        var prefix = catalog is null ? null : ExcludePaths.NormalizePrefix(catalog.PathTemplate);
+        var owner = System.Windows.Application.Current?.MainWindow;
+
+        if (item.IsChecked)
+        {
+            // Checking exclude → offer purge from index
+            var choice = IndexSyncDialog.Show(owner,
+                "Remove these folders from the index?\n\nYes — delete indexed paths under this folder.\nNo — hide them in results only.\nCancel — leave the checkbox unchanged.");
+            if (choice == IndexSyncDialog.Choice.Cancel)
+            {
+                _suppressExcludeSync = true;
+                try { item.SetCheckedSilent(false); }
+                finally { _suppressExcludeSync = false; }
+                return;
+            }
+            PersistCommonExcludes();
+            if (choice == IndexSyncDialog.Choice.Yes && !string.IsNullOrEmpty(prefix))
+            {
+                try { _db.PurgePrefix(prefix); }
+                catch (Exception ex) { ErrorLog.AppendFailure("PurgePrefix", ex, failedPath: prefix); }
+            }
+        }
+        else
+        {
+            // Unchecking exclude → offer crawl into live index
+            var choice = IndexSyncDialog.Show(owner,
+                "Add these folders to the index now?\n\nYes — crawl into the existing index.\nNo — show them in results only if already indexed.\nCancel — leave the checkbox unchanged.");
+            if (choice == IndexSyncDialog.Choice.Cancel)
+            {
+                _suppressExcludeSync = true;
+                try { item.SetCheckedSilent(true); }
+                finally { _suppressExcludeSync = false; }
+                return;
+            }
+            PersistCommonExcludes();
+            if (choice == IndexSyncDialog.Choice.Yes && !string.IsNullOrEmpty(prefix))
+            {
+                var p = prefix;
+                _ = Task.Run(() =>
+                {
+                    try { _indexer.CrawlIntoExisting(p); }
+                    catch (Exception ex) { ErrorLog.AppendFailure("CrawlIntoExisting", ex, failedPath: p); }
+                    _dispatcher.BeginInvoke(() => ScheduleSearch());
+                });
+            }
+        }
+
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
+        ScheduleSearch();
+    }
+
+    private void PersistCommonExcludes()
     {
         _settings.CheckedCommonExcludeIds = CommonExcludes
             .Where(c => c.IsChecked)
@@ -610,8 +672,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .ToList();
         _settings.CommonExcludesInitialized = true;
         PersistSettings();
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
-        ScheduleSearch();
     }
 
     private void AddCustomExclude()
@@ -627,9 +687,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         if (CustomExcludePaths.Any(x => x.Equals(path, StringComparison.OrdinalIgnoreCase)))
             return;
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        var choice = IndexSyncDialog.Show(owner,
+            "Remove these folders from the index?\n\nYes — delete indexed paths under this folder.\nNo — hide them in results only.\nCancel — do not add the exclude.");
+        if (choice == IndexSyncDialog.Choice.Cancel)
+            return;
+
         CustomExcludePaths.Add(path);
         SyncCustomExcludesToSettings();
         PersistSettings();
+        if (choice == IndexSyncDialog.Choice.Yes)
+        {
+            try { _db.PurgePrefix(path); }
+            catch (Exception ex) { ErrorLog.AppendFailure("PurgePrefix", ex, failedPath: path); }
+        }
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
         ScheduleSearch();
     }
@@ -641,11 +713,50 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var match = CustomExcludePaths.FirstOrDefault(x => x.Equals(path, StringComparison.OrdinalIgnoreCase));
         if (match is null)
             return;
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        var choice = IndexSyncDialog.Show(owner,
+            "Add these folders to the index now?\n\nYes — crawl into the existing index.\nNo — show them in results only if already indexed.\nCancel — keep the exclude.");
+        if (choice == IndexSyncDialog.Choice.Cancel)
+            return;
+
         CustomExcludePaths.Remove(match);
         SyncCustomExcludesToSettings();
         PersistSettings();
+        if (choice == IndexSyncDialog.Choice.Yes)
+        {
+            var p = match;
+            _ = Task.Run(() =>
+            {
+                try { _indexer.CrawlIntoExisting(p); }
+                catch (Exception ex) { ErrorLog.AppendFailure("CrawlIntoExisting", ex, failedPath: p); }
+                _dispatcher.BeginInvoke(() => ScheduleSearch());
+            });
+        }
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
         ScheduleSearch();
+    }
+
+    private void CopyFullPath()
+    {
+        var target = ActionTarget;
+        if (target is null) return;
+        try { Clipboard.SetText(target.FullPath); }
+        catch { /* clipboard busy */ }
+    }
+
+    private void CopyContainingPath()
+    {
+        var target = ActionTarget;
+        if (target is null) return;
+        try
+        {
+            var dir = target.IsDirectory
+                ? target.FullPath
+                : (Path.GetDirectoryName(target.FullPath) ?? target.FullPath);
+            Clipboard.SetText(dir);
+        }
+        catch { /* clipboard busy */ }
     }
 
     private void SyncCustomExcludesToSettings()
@@ -693,12 +804,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         IReadOnlyList<FileEntry> hits;
         bool invalidRegex = false;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        string route = "fts";
         try
         {
             hits = await Task.Run(() =>
             {
                 var r = _search.Search(querySnapshot, options, out var inv);
                 invalidRegex = inv;
+                route = _db.LastSearchRoute;
                 return r;
             }).ConfigureAwait(false);
         }
@@ -712,6 +826,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             });
             return;
         }
+
+        sw.Stop();
+        var cancelled = generation != Volatile.Read(ref _searchGeneration);
+        var capped = !cancelled && hits.Count >= _settings.MaxResults;
+        SearchTimingLog.Append(
+            sw.Elapsed.TotalMilliseconds,
+            cancelled ? 0 : hits.Count,
+            capped,
+            cancelled,
+            route,
+            querySnapshot,
+            options.MatchCase,
+            options.WholeWord,
+            options.UseRegex,
+            options.MatchMode.ToString(),
+            options.EnabledDrivePrefixes.Count,
+            options.ExcludePathPrefixes.Count);
 
         await _dispatcher.InvokeAsync(() => ApplySearchResults(hits, generation, invalidRegex));
     }

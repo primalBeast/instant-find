@@ -10,6 +10,10 @@ namespace InstantFind.Services;
 /// </summary>
 public sealed class IndexDatabase : IDisposable
 {
+
+    /// <summary>Route of the most recent Search: fts | like | exact.</summary>
+    public string LastSearchRoute { get; private set; } = "fts";
+
     public const string RebuildFileName = "index-rebuild.db";
 
     private readonly string _connectionString;
@@ -364,6 +368,13 @@ public sealed class IndexDatabase : IDisposable
     }
 
     /// <summary>
+    /// Remove this path and all descendants from the live index (no ClearAll / rebuild swap).
+    /// Alias for DeleteUnderDirectory used by exclude-sync Yes=purge.
+    /// </summary>
+    public void PurgePrefix(string directoryPrefix) => DeleteUnderDirectory(directoryPrefix);
+
+
+    /// <summary>
     /// Batched prune: remove indexed paths under <paramref name="prefix"/> that no longer
     /// exist on disk. Returns number of rows deleted.
     /// </summary>
@@ -489,13 +500,21 @@ public sealed class IndexDatabase : IDisposable
         bool leaveFts = options.MatchCase || options.WholeWord || query.HasWildcards
                         || query.UseRegex || query.HasNotTerms || query.ExactNameTerms.Count > 0;
         if (leaveFts)
+        {
+            LastSearchRoute = query.ExactNameTerms.Count > 0 ? "exact" : "like";
             return SearchWithLike(query, maxResults, includeDirectories, options);
+        }
 
         var results = new List<FileEntry>();
         var fts = QueryParser.BuildFtsMatch(query);
         // Terms with FTS unicode61 separators (_, -, etc.) → LIKE so literals are required.
         if (fts is null && query.Terms.Count > 0)
+        {
+            LastSearchRoute = "like";
             return SearchWithLike(query, maxResults, includeDirectories, options);
+        }
+
+        LastSearchRoute = "fts";
 
         using var cmd = Conn().CreateCommand();
         cmd.CommandTimeout = 60; // always finish; never hang the UI spinner forever
@@ -560,6 +579,7 @@ public sealed class IndexDatabase : IDisposable
         catch (SqliteException)
         {
             // Bad FTS syntax — fall back to LIKE search
+            LastSearchRoute = "like";
             return SearchWithLike(query, maxResults, includeDirectories, options);
         }
 

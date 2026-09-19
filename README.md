@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.25) | https://github.com/primalBeast/instant-find/releases/download/v1.0.25/InstantFind-win-x64.zip |
+| Direct zip (v1.0.26) | https://github.com/primalBeast/instant-find/releases/download/v1.0.26/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -36,6 +36,7 @@ Settings and the index database live under:
   settings.json
   index.db
   index-rebuild.db   (temp during rebuild; discarded if leftover)
+  InstantFind-search.log  (silent search timing JSONL; v1.0.26+)
 ```
 
 **Indexed roots**: only physical local Fixed/Removable volumes. Never indexed (pruned from `indexedRoots` / chips on load):
@@ -45,15 +46,22 @@ Settings and the index database live under:
 
 Logs written **next to `InstantFind.exe`** (portable zip folder):
 
-- `InstantFind-startup.log` — boot breadcrumbs (v1.0.25+)
+- `InstantFind-startup.log` — boot breadcrumbs (v1.0.26+)
 - `InstantFind-error.log` — index failures, sharing-violation soft-skips, and unhandled crashes (full exception + stack)
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.25)
+## Features (v1.0.26)
 
+- **Caption chrome (v1.0.26)**: Minimize uses Segoe MDL2 `E921` at ~10–12px (same weight as maximize); ~12px gap between Help and Min; Min·Max·Close stay tight. WindowChrome still applied on `SourceInitialized` with system-chrome fallback (v1.0.25).
+- **Filter popup (v1.0.26)**: Your folders (+ add) above Common folders; size chips ascending (<100KB → >100MB); Date modified Today → Yesterday → This week → This month → This year; popup max height tracks host window (scroll only if needed).
+- **Exclude index sync (v1.0.26)**: Checking/adding an exclude asks to remove folders from the index (`PurgePrefix`) or hide in results only; unchecking/removing asks to crawl into the live index (`CrawlIntoExisting`) or show if already indexed — Cancel reverts. Never ClearAll / full rebuild. Watcher no-ops under active excludes.
+- **Clear × (v1.0.26)**: Immediately left of Filter (`search → … → × · Filter · And/Or · spinner`); tooltip "Clear search."
+- **Context menu (v1.0.26)**: Copy full path · Copy containing path (own group with dividers).
+- **Search timing log (v1.0.26)**: Silent JSONL append to `%AppData%\InstantFind\InstantFind-search.log` (exe-dir soft fallback) after each finished search — ts, ms, hits, capped, cancelled, route (`fts|like|exact`), query, flags. No Settings UI.
 - **Startup + crash logs (v1.0.25)**: beside `InstantFind.exe`, `InstantFind-startup.log` records boot breadcrumbs (timestamps, OS, .NET, assembly version, MainWindow ctor/Loaded/Show). `InstantFind-error.log` also captures unhandled exceptions (`AppDomain`, `Dispatcher`, `TaskScheduler`) with full stacks. Custom title bar chrome is applied after HWND init with fallback to system chrome if WindowChrome fails — fixes silent no-window launch from v1.0.24.
 - **Custom title bar (v1.0.24)**: the muted assembly version is to the right of the title with shared baseline alignment and no underline; themed minimize, maximize/restore, close, drag, and double-click maximize controls replace the Windows title bar.
+
 - **Help layout (v1.0.21)**: Help window redesigned for scannability — section cards with short blurbs, two-column example rows (query in monospace + what it does), generous spacing, larger default size with scroll. Same content accuracy (quotes, paths, NOT, size/date, macros, Exclude, CrowdStrike note, keyboard). Esc still closes.
 - **Quoted exact file name (v1.0.20)**: `"hosts"` matches only a file whose name is exactly `hosts` (not `hostsim`, not `hosts.txt`). `"annual report"` matches only a file named exactly `annual report` — use `"annual report.pdf"` to find the PDF. Case follows **Aa**; Whole Word does not change quoted matching. Unquoted terms keep substring / And/Or. Mix with unquoted terms, `!"hosts"`, path scope, and macros. Escape a literal quote inside quotes with `\"`.
 - **Windows exclude vs hosts (v1.0.19)**: Filter → Exclude → Windows is path-based (`C:\Windows\…`) only. A legacy basename skip for the folder name `Windows` no longer blocks crawl when that checkbox is off — so `C:\Windows\System32\drivers\etc\hosts` can be found after you uncheck Windows and **Rebuild Index** once. Extensionless `hosts` matches a search for `hosts`.
@@ -63,19 +71,9 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 - **No cloud-mapped letters (v1.0.17)**: Google Drive for desktop / File Stream, OneDrive, Dropbox, etc. are excluded even when `DriveType` is Fixed (label + root markers via `DriveHelpers.IsIndexableLocalDrive`). Saved `IndexedRoots` / chips pruned on load.
 - **Skip locked files (v1.0.16)**: Rebuild no longer hard-fails when a content file is locked (`IOException` / sharing violation / access denied). Crawl skips those entries and continues; status can show `skipped N locked`.
 - **No network / mapped drives (v1.0.16)**: Defaults, EnsureDefaults, Rebuild, and drive chips exclude `DriveType.Network` mapped letters and UNC roots (`\\server\share`).
-
 - **Exclude (v1.0.15)**: Filter popup → Exclude. Common folders with checkboxes (defaults: Windows, Program Files, Recycle Bin, System Volume Information, Recovery) plus custom folders via **+**. Search hides them; rebuild skips them.
-
 - **Help (v1.0.15)**: `?` button top-right opens a themed Help window (Esc to close). Drive chip tooltips say “toggle drive in results” only.
-
 - **NOT / Filter popup / size·date / macros / columns (v1.0.15)**:
-  - **NOT**: Everything-style `!term` / `!*.tmp` excludes matches (works with And/Or, path scope, macros).
-  - **Filter** button (left of And/Or): anchored popup (app theme) with Size / Date modified / Type / Saved filters. Active filters highlight the button; **Clear filters** removes `size:`, `dm:`, and type macros.
-  - **Size query**: `size:>1mb`, `size:<100kb`, `size:1mb..10mb` (units b/kb/mb/gb).
-  - **Date modified**: `dm:today`, `dm:yesterday`, `dm:thisweek`, `dm:thismonth`, `dm:thisyear`, `dm:2024-01-01..2024-12-31`, `dm:>2024-06-01`.
-  - **Type macros**: `doc:`, `img:`/`image:`, `vid:`/`video:`, `audio:`, `zip:`/`archive:`, `code:`, `xls:`, `ppt:`, `exe:`, `font:`, `iso:` — expand to common extension sets (same as Filter → Type).
-  - **Saved filters**: name + save current query; one-click activate; persisted in `settings.json`.
-  - **Extra columns**: context menu → Show Extension / Show Attributes (R/H/S/A/… from index or live `File.GetAttributes`).
 - **Path scope + path term spaces (v1.0.12)**: `C:\Logs  \72` (spaces, no trailing `\` after the folder) scopes to `C:\Logs\` and applies Instant Find segment prefix `\72`. Also `C:\Logs\`, `C:\Logs\ \72` / `C:\Logs\\72`, global `\72`, and normal name search under a scoped path. Search always completes (spinner off); silent refresh no longer orphans in-flight searches.
 - **Path term `\72` (v1.0.11)**: Instant Find path matching — a term starting with `\` matches a **path/directory segment** that **starts with** the rest (e.g. `\72` hits `C:\data\72folder\…` and `C:\docs\72report.txt`, but not bare-name FTS that ignores `\` and would match `6728` / `x72y`). Leaves FTS; SQL `LIKE` on `path` only. Drive path-scope unchanged: `C:\foo\` still scopes.
 - **App icon (v1.0.10)**: Windows exe / window icon from `Assets/app.ico` (multi-size). Source art: ![Instant Find icon](src/InstantFind/Assets/app-icon.png)
@@ -86,38 +84,16 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 - **Path scope (v1.0.7+ / v1.0.12)**: leading Windows path **ending in `\`** scopes results (e.g. `C:\Work\`, `C:\Projects\*.pdf`). `C:\Projects` (no trailing `\`) is **not** a scope — **except** when followed by whitespace and a path term (`C:\Logs  \72` → scope `C:\Logs\` + `\72`, v1.0.12). Path-only (`C:\Projects\`) lists under that folder. Kept with FTS when possible (v1.0.8). Drive chips still apply.
 - **Open with… (v1.0.7)**: context menu → **Open with…** → **Favorite apps** (recent exe paths, last 8, in `settings.json`) and **Choose another app…** (OpenFileDialog starting in Program Files). Files only; soft-fails if the exe is missing.
 - **Drag results out (v1.0.7)**: drag a result row from the grid to Explorer / other drop targets (OLE `FileDrop` with the real path). Uses the selected row.
-- Instant as-you-type search after the first index completes
 - **Live results refresh**: when the index updates (create/change/delete/rename via FileSystemWatcher), an active query re-runs automatically (debounced ~350ms) so new files appear within ~1 second — **silently** (no spinner / no “Searching…” flicker; status updates to the final count only)
 - **Stable context menu (v1.0.5)**: silent refresh skips Clear/rebuild when the hit set is unchanged, preserves selection when it changes, and pauses while the context menu is open (plus a right-click `ContextTarget`) so Open / folder / Notepad++ / CMD / Git Bash stay enabled
 - **And / Or in search bar (v1.0.5)**: moved from the title row into the search field row (right-justified, before the spinner)
-- Compact search-bar tools: **Aa** / **W** use MinWidth + padding so glyphs are not clipped; ✕ stays small
 - **Circular busy spinner** in the search bar for **user-initiated** searches only (typing / And-Or / MatchCase / WholeWord / Clear / drive chips) — not for watcher refreshes
 - **And / Or** checkboxes (right side of the search bar, before the spinner): default And; both off = literal whitespace (spaces must appear in the name)
 - **Drive chips** (bottom right): toggle indexed drive letters (`C:`, `D:`, …). Off hides that drive from results instantly and excludes it from Rebuild Index. No new per-drive watchers.
-- Search bar tools: **✕** clear + refocus, **Aa** Match Case, **W** Whole Word, `.*` Regex, then the query box
-- Match Case, Whole Word, wildcards, Regex, or terms with FTS separators (`_` / `-` / other non-alphanumeric) leave FTS and use SQL `LIKE` / in-memory filter (still capped by `maxResults`). Path scope alone keeps FTS + SQL path prefix when terms are FTS-safe (v1.0.8 / v1.0.10)
-- Results columns: **Name**, **Path**, **Size**, **Date Modified** (Size/Date from index); optional **Extension** / **Attributes** via context menu
-- Context menu: Open, Open Containing Folder, **Open with…** (favorites + choose .exe), **Edit with Notepad++** (files only; soft-fails if Notepad++ is missing), **Open path in Command Prompt**, **Open path in Git Bash** (soft-fails if Git Bash is missing)
-- Keyboard: type to search, `↓` into results, `Enter` open, `Ctrl+Enter` open containing folder, `Esc` back to search box
-- Filters:
-  - Substring match via FTS5 (case-insensitive, unless Match Case / Whole Word / Regex)
-  - Wildcards `*` and `?` via SQL `LIKE` (e.g. `D*.pdf`, `*.pdf`, `test?.txt`)
-  - NOT: `!term` / `!*.tmp` excludes matches
-  - Extension filter: `ext:pdf` (e.g. `invoice ext:pdf`)
-  - Type macros: `doc:`, `img:`, `vid:`, `audio:`, `zip:`, `code:`, …
-  - Size: `size:>1mb`, `size:1mb..10mb`
-  - Date modified: `dm:today`, `dm:thisyear`, `dm:2024-01-01..2024-12-31`
-  - Regex (`.*` toggle): .NET regex against filename (see above)
-  - Path scope: leading `X:\dir\` prefix restricts hits to that directory
-  - Path term: leading `\` (e.g. `\72`) matches path segments that start with the rest
-  - Filter popup (search bar) for size / date / type / saved filters
-- Parallel multi-root indexing with progress status
-- Skips inaccessible / locked files and directories instead of failing the whole rebuild (v1.0.16)
 - **Size & Date Modified (v1.0.6)**: shown from the **SQLite index** (set at crawl / FileWatcher `IndexSinglePath`), not live disk on every search. Silent refresh and re-search now update Size/Modified **in place** when paths are unchanged but metadata changed (so the grid repaints without clearing selection / context menu)
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
-- Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.25)
+## Query syntax (v1.0.26)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -160,8 +136,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.25 && git push origin v1.0.25`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.25`
+1. **Tag** — push a version tag: `git tag v1.0.26 && git push origin v1.0.26`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.26`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

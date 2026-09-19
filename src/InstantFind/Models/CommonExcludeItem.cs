@@ -30,6 +30,14 @@ public sealed class CommonExcludeItem : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Set checkbox without raising <see cref="Changed"/> (Cancel / revert).</summary>
+    public void SetCheckedSilent(bool value)
+    {
+        if (_isChecked == value) return;
+        _isChecked = value;
+        OnPropertyChanged(nameof(IsChecked));
+    }
+
     public event EventHandler? Changed;
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null)

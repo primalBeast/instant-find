@@ -601,11 +601,70 @@ public sealed class FileIndexer
         }
     }
 
+
+    /// <summary>
+    /// Incrementally crawl <paramref name="prefix"/> into the live index DB.
+    /// Soft-skips locked files; respects other active excludes; never ClearAll / swap.
+    /// </summary>
+    public void CrawlIntoExisting(string prefix, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || !Directory.Exists(prefix))
+            return;
+
+        var exclude = new HashSet<string>(
+            _settings.ExcludedDirectoryNames ?? new List<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var n in ExcludePaths.PathPrefixControlledNames)
+            exclude.Remove(n);
+
+        // Active excludes except the prefix we are (re)adding
+        var normalizedTarget = ExcludePaths.NormalizePrefix(prefix);
+        var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings)
+            .Where(p => !string.Equals(p, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var pending = new ConcurrentQueue<string>();
+        pending.Enqueue(prefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var localBatch = new List<FileEntry>(256);
+        long filesIndexed = 0;
+        long skippedLocked = 0;
+
+        while (pending.TryDequeue(out var dir))
+        {
+            ct.ThrowIfCancellationRequested();
+            EnumerateDirectory(
+                dir,
+                exclude,
+                excludePrefixes,
+                pending,
+                localBatch,
+                ref filesIndexed,
+                ref skippedLocked,
+                progress: null,
+                ct,
+                _db);
+
+            if (localBatch.Count >= 200)
+            {
+                SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+                localBatch.Clear();
+            }
+        }
+
+        if (localBatch.Count > 0)
+            SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+    }
+
     public void IndexSinglePath(string path)
     {
         try
         {
             if (DriveHelpers.IsRemoteRoot(path))
+                return;
+
+            // Watcher no-op under active excludes (post-purge / hide-only)
+            var excludes = ExcludePaths.ResolveActivePrefixes(_settings);
+            if (ExcludePaths.IsUnderAny(path, excludes))
                 return;
 
             if (Directory.Exists(path))

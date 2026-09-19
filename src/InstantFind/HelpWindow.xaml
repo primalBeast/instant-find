@@ -354,7 +354,7 @@
             <StackPanel>
               <TextBlock Style="{StaticResource SectionTitle}" Text="Exclude folders"/>
               <TextBlock Style="{StaticResource SectionBlurb}"
-                         Text="Filter → Exclude: check common folders (C:\Windows, Program Files, …) or add your own with +. Excluded paths are hidden from results immediately and skipped on the next Rebuild Index."/>
+                         Text="Filter → Exclude: check common folders (C:\Windows, Program Files, …) or add your own with +. Excluded paths are hidden from results immediately. Checking an exclude can purge those paths from the live index (or hide only); unchecking can crawl them back in (or leave the index unchanged). Esc cancels. Skipped again on the next full Rebuild Index."/>
             </StackPanel>
           </Border>
 

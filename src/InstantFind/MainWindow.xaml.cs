@@ -46,6 +46,13 @@ public partial class MainWindow : Window
             DataContext = _vm;
             StartupLog.Append("MainWindow.ViewModel.Ready");
 
+            SizeChanged += (_, _) => UpdateFilterPopupMaxHeight();
+            _vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.IsFilterPopupOpen) && _vm.IsFilterPopupOpen)
+                    UpdateFilterPopupMaxHeight();
+            };
+
             _vm.FocusSearchRequested += () =>
             {
                 SearchBox.Focus();
@@ -338,4 +345,22 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
     }
+
+    /// <summary>
+    /// Filter popup height = min(content, host client height − margins); ScrollViewer only if needed.
+    /// </summary>
+    private void UpdateFilterPopupMaxHeight()
+    {
+        try
+        {
+            if (FilterPopupBorder is null) return;
+            var max = Math.Max(160, ActualHeight - 80);
+            FilterPopupBorder.MaxHeight = max;
+        }
+        catch
+        {
+            // soft-fail — keep XAML MaxHeight
+        }
+    }
+
 }
