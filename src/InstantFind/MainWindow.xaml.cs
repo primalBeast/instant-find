@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -11,6 +12,8 @@ namespace InstantFind;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _vm;
+    public string AppVersion { get; } =
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown";
     private Point _dragStart;
     private bool _dragPending;
 
