@@ -4,7 +4,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shell;
 using InstantFind.Models;
+using InstantFind.Services;
 using InstantFind.ViewModels;
 
 namespace InstantFind;
@@ -16,28 +18,147 @@ public partial class MainWindow : Window
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown";
     private Point _dragStart;
     private bool _dragPending;
+    private bool _customChromeApplied;
 
     public MainWindow()
     {
-        InitializeComponent();
-        _vm = new MainViewModel();
-        DataContext = _vm;
-        _vm.FocusSearchRequested += () =>
+        StartupLog.Append("MainWindow.Ctor.Begin");
+        try
         {
-            SearchBox.Focus();
-            SearchBox.SelectAll();
-        };
-        _vm.PropertyChanged += Vm_PropertyChanged;
-        Closed += (_, _) =>
+            InitializeComponent();
+            StartupLog.Append("MainWindow.InitializeComponent.Done");
+
+            if (VersionRun is not null)
+                VersionRun.Text = AppVersion;
+
+            // Prefer opaque brush from resources (WindowChrome may set HWND bg transparent).
+            try
+            {
+                if (TryFindResource("BgBrush") is Brush bg)
+                    Background = bg;
+            }
+            catch (Exception ex)
+            {
+                StartupLog.Append("MainWindow.BgBrush.Failed", ex.Message);
+            }
+
+            _vm = new MainViewModel();
+            DataContext = _vm;
+            StartupLog.Append("MainWindow.ViewModel.Ready");
+
+            _vm.FocusSearchRequested += () =>
+            {
+                SearchBox.Focus();
+                SearchBox.SelectAll();
+            };
+            _vm.PropertyChanged += Vm_PropertyChanged;
+            Closed += (_, _) =>
+            {
+                _vm.PropertyChanged -= Vm_PropertyChanged;
+                _vm.Dispose();
+                StartupLog.Append("MainWindow.Closed");
+            };
+            SourceInitialized += MainWindow_SourceInitialized;
+            Loaded += MainWindow_Loaded;
+            ContentRendered += (_, _) => StartupLog.Append(
+                "MainWindow.ContentRendered",
+                $"state={WindowState} vis={Visibility} chrome={_customChromeApplied}");
+
+            StartupLog.Append("MainWindow.Ctor.Complete", $"version={AppVersion}");
+        }
+        catch (Exception ex)
         {
-            _vm.PropertyChanged -= Vm_PropertyChanged;
-            _vm.Dispose();
-        };
-        Loaded += (_, _) =>
+            ErrorLog.AppendFailure("MainWindow.Ctor", ex);
+            StartupLog.Append("MainWindow.Ctor.Failed", $"{ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        StartupLog.Append("MainWindow.SourceInitialized.Begin", $"hwndReady style={WindowStyle}");
+        ApplyCustomChrome();
+        try
         {
+            // Ensure we are visible even if chrome briefly left the HWND transparent.
+            if (Visibility != Visibility.Visible)
+                Visibility = Visibility.Visible;
+            StartupLog.Append("MainWindow.SourceInitialized.Done", $"chrome={_customChromeApplied}");
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.AppendFailure("MainWindow.SourceInitialized", ex);
+            StartupLog.Append("MainWindow.SourceInitialized.Failed", ex.Message);
+        }
+    }
+
+    private void ApplyCustomChrome()
+    {
+        try
+        {
+            // Robust WindowStyle=None + WindowChrome pattern (caption hit-test via IsHitTestVisibleInChrome).
+            var chrome = new WindowChrome
+            {
+                CaptionHeight = 44,
+                ResizeBorderThickness = new Thickness(6),
+                // 0 = no glass extend; avoids DwmExtendFrameIntoClientArea failure paths when DWM blips.
+                GlassFrameThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false
+            };
+            WindowChrome.SetWindowChrome(this, chrome);
+            _customChromeApplied = true;
+            StartupLog.Append("MainWindow.WindowChrome.Applied", "CaptionHeight=44 GlassFrame=0");
+        }
+        catch (Exception ex)
+        {
+            _customChromeApplied = false;
+            ErrorLog.AppendFailure("MainWindow.WindowChrome", ex);
+            StartupLog.Append("MainWindow.WindowChrome.Failed", $"{ex.GetType().Name}: {ex.Message}");
+            try
+            {
+                WindowChrome.SetWindowChrome(this, null!);
+            }
+            catch { /* ignore */ }
+
+            // Fall back to system chrome so the window still appears and is usable.
+            try
+            {
+                WindowStyle = WindowStyle.SingleBorderWindow;
+                ResizeMode = ResizeMode.CanResize;
+                StartupLog.Append("MainWindow.WindowChrome.Fallback", "restored SingleBorderWindow system chrome");
+            }
+            catch (Exception fallbackEx)
+            {
+                ErrorLog.AppendFailure("MainWindow.WindowChrome.Fallback", fallbackEx);
+                StartupLog.Append("MainWindow.WindowChrome.Fallback.Failed", fallbackEx.Message);
+            }
+        }
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            StartupLog.Append(
+                "MainWindow.Loaded",
+                $"state={WindowState} vis={Visibility} active={IsActive} chrome={_customChromeApplied}");
             SyncColumnVisibility();
             SearchBox.Focus();
-        };
+
+            // If still not showing for any reason, force activate once.
+            if (!IsVisible || !IsActive)
+            {
+                Show();
+                Activate();
+                StartupLog.Append("MainWindow.Loaded.ForceShowActivate");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.AppendFailure("MainWindow.Loaded", ex);
+            StartupLog.Append("MainWindow.Loaded.Failed", ex.Message);
+        }
     }
 
     private void Vm_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -139,7 +260,6 @@ public partial class MainWindow : Window
         }
         return null;
     }
-
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

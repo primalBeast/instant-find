@@ -119,18 +119,7 @@ public static class ErrorLog
             if (!string.IsNullOrEmpty(extra))
                 sb.AppendLine($"Extra: {extra}");
 
-            if (ex is not null)
-            {
-                sb.AppendLine($"ExceptionType: {ex.GetType().FullName}");
-                sb.AppendLine($"Message: {ex.Message}");
-                sb.AppendLine($"HResult: 0x{ex.HResult:X8}");
-                sb.AppendLine("Stack:");
-                sb.AppendLine(ex.StackTrace ?? "(none)");
-                if (ex.InnerException is not null)
-                {
-                    sb.AppendLine($"Inner: {ex.InnerException.GetType().FullName}: {ex.InnerException.Message}");
-                }
-            }
+            AppendExceptionDetails(sb, ex);
 
             sb.AppendLine();
             File.AppendAllText(LogPath, sb.ToString());
@@ -138,6 +127,54 @@ public static class ErrorLog
         catch
         {
             // Never let logging crash the app
+        }
+    }
+
+    /// <summary>
+    /// Unhandled crash dump for AppDomain / Dispatcher / TaskScheduler hooks.
+    /// Writes full exception graph + stack before the process exits.
+    /// </summary>
+    public static void AppendUnhandled(string source, Exception? ex, bool isTerminating = false)
+    {
+        try
+        {
+            var sb = new StringBuilder(2048);
+            sb.AppendLine("########## UNHANDLED ##########");
+            sb.AppendLine($"UTC: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z");
+            sb.AppendLine($"Version: {AppVersion}");
+            sb.AppendLine($"Source: {source}");
+            sb.AppendLine($"IsTerminating: {isTerminating}");
+            sb.AppendLine($"ProcessId: {Environment.ProcessId}");
+            sb.AppendLine($"OS: {Environment.OSVersion}");
+            sb.AppendLine($".NET: {Environment.Version}");
+            AppendExceptionDetails(sb, ex);
+            sb.AppendLine();
+            File.AppendAllText(LogPath, sb.ToString());
+            StartupLog.Append("UnhandledException", $"{source} terminating={isTerminating} type={ex?.GetType().FullName}");
+        }
+        catch
+        {
+            // Never let logging crash the app
+        }
+    }
+
+    private static void AppendExceptionDetails(StringBuilder sb, Exception? ex)
+    {
+        if (ex is null)
+        {
+            sb.AppendLine("Exception: (null)");
+            return;
+        }
+
+        var depth = 0;
+        for (Exception? cur = ex; cur is not null; cur = cur.InnerException, depth++)
+        {
+            var prefix = depth == 0 ? "Exception" : $"Inner[{depth}]";
+            sb.AppendLine($"{prefix}Type: {cur.GetType().FullName}");
+            sb.AppendLine($"{prefix}Message: {cur.Message}");
+            sb.AppendLine($"{prefix}HResult: 0x{cur.HResult:X8}");
+            sb.AppendLine($"{prefix}Stack:");
+            sb.AppendLine(cur.StackTrace ?? "(none)");
         }
     }
 

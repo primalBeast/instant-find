@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.24) | https://github.com/primalBeast/instant-find/releases/download/v1.0.24/InstantFind-win-x64.zip |
+| Direct zip (v1.0.25) | https://github.com/primalBeast/instant-find/releases/download/v1.0.25/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -43,12 +43,16 @@ Settings and the index database live under:
 - Mapped network drives (`DriveType.Network`) and UNC (`\\server\share`)
 - **Cloud-mapped letters** that often report as Fixed — Google Drive for desktop / File Stream (e.g. `G:`), OneDrive, Dropbox, and similar (volume label + root folder markers)
 
-`InstantFind-error.log` is written **next to `InstantFind.exe`** (portable zip folder) on index failures and notable sharing-violation soft-skips.
+Logs written **next to `InstantFind.exe`** (portable zip folder):
+
+- `InstantFind-startup.log` — boot breadcrumbs (v1.0.25+)
+- `InstantFind-error.log` — index failures, sharing-violation soft-skips, and unhandled crashes (full exception + stack)
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.24)
+## Features (v1.0.25)
 
+- **Startup + crash logs (v1.0.25)**: beside `InstantFind.exe`, `InstantFind-startup.log` records boot breadcrumbs (timestamps, OS, .NET, assembly version, MainWindow ctor/Loaded/Show). `InstantFind-error.log` also captures unhandled exceptions (`AppDomain`, `Dispatcher`, `TaskScheduler`) with full stacks. Custom title bar chrome is applied after HWND init with fallback to system chrome if WindowChrome fails — fixes silent no-window launch from v1.0.24.
 - **Custom title bar (v1.0.24)**: the muted assembly version is to the right of the title with shared baseline alignment and no underline; themed minimize, maximize/restore, close, drag, and double-click maximize controls replace the Windows title bar.
 - **Help layout (v1.0.21)**: Help window redesigned for scannability — section cards with short blurbs, two-column example rows (query in monospace + what it does), generous spacing, larger default size with scroll. Same content accuracy (quotes, paths, NOT, size/date, macros, Exclude, CrowdStrike note, keyboard). Esc still closes.
 - **Quoted exact file name (v1.0.20)**: `"hosts"` matches only a file whose name is exactly `hosts` (not `hostsim`, not `hosts.txt`). `"annual report"` matches only a file named exactly `annual report` — use `"annual report.pdf"` to find the PDF. Case follows **Aa**; Whole Word does not change quoted matching. Unquoted terms keep substring / And/Or. Mix with unquoted terms, `!"hosts"`, path scope, and macros. Escape a literal quote inside quotes with `\"`.
@@ -113,7 +117,7 @@ Settings and the index database live under:
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 - Rebuild Index from the toolbar (with confirm)
 
-## Query syntax (v1.0.24)
+## Query syntax (v1.0.25)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -156,8 +160,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.24 && git push origin v1.0.24`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.24`
+1. **Tag** — push a version tag: `git tag v1.0.25 && git push origin v1.0.25`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.25`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

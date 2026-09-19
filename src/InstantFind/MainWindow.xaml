@@ -7,18 +7,14 @@
         Height="640" Width="960"
         MinHeight="400" MinWidth="640"
         WindowStartupLocation="CenterScreen"
+        ShowActivated="True"
+        ShowInTaskbar="True"
         WindowStyle="None"
         ResizeMode="CanResize"
         Background="{StaticResource BgBrush}"
         Foreground="{StaticResource FgBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
-  <WindowChrome.WindowChrome>
-    <shell:WindowChrome CaptionHeight="44"
-                         ResizeBorderThickness="6"
-                         GlassFrameThickness="0"
-                         CornerRadius="0"
-                         UseAeroCaptionButtons="False"/>
-  </WindowChrome.WindowChrome>
+  <!-- WindowChrome applied in code (SourceInitialized) so DWM/chrome failures can fall back. -->
   <Window.Resources>
     <Style x:Key="ChromeButtonStyle" TargetType="Button">
       <Setter Property="Width" Value="46"/>
@@ -46,17 +42,35 @@
         </Setter.Value>
       </Setter>
     </Style>
-    <Style x:Key="CloseChromeButtonStyle" TargetType="Button" BasedOn="{StaticResource ChromeButtonStyle}">
-      <Style.Triggers>
-        <Trigger Property="IsMouseOver" Value="True">
-          <Setter Property="Background" Value="#C42B1C"/>
-          <Setter Property="Foreground" Value="White"/>
-        </Trigger>
-        <Trigger Property="IsPressed" Value="True">
-          <Setter Property="Background" Value="#E81123"/>
-          <Setter Property="Foreground" Value="White"/>
-        </Trigger>
-      </Style.Triggers>
+    <!-- Full template (not BasedOn triggers) so hover red is not overridden by ChromeButtonStyle Bd triggers. -->
+    <Style x:Key="CloseChromeButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="46"/>
+      <Setter Property="Height" Value="44"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{StaticResource FgBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#C42B1C"/>
+                <Setter Property="Foreground" Value="White"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E81123"/>
+                <Setter Property="Foreground" Value="White"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
   </Window.Resources>
   <DockPanel>
@@ -73,19 +87,18 @@
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
+      <!-- Version set in code (named Run) — Binding on Run.Text is fragile at InitializeComponent. -->
       <TextBlock Grid.Column="0"
                  FontSize="20" FontWeight="SemiBold"
                  VerticalAlignment="Center"
-                 Margin="16,0,16,0"
-                 TextDecorations="{x:Null}">
+                 Margin="16,0,16,0">
         <Run Text="Instant Find" BaselineAlignment="Baseline"/>
         <Run Text=" " BaselineAlignment="Baseline"/>
-        <Run Text="{Binding RelativeSource={RelativeSource AncestorType={x:Type Window}}, Path=AppVersion}"
+        <Run x:Name="VersionRun"
              FontSize="12"
              FontWeight="Normal"
              Foreground="{StaticResource MutedBrush}"
-             BaselineAlignment="Baseline"
-             TextDecorations="{x:Null}"/>
+             BaselineAlignment="Baseline"/>
       </TextBlock>
       <Button Grid.Column="1"
               Content="{Binding IndexButtonText}"
