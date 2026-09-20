@@ -72,6 +72,42 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- Drive chips: unselected dimmed; selected = accent fill + muted ink (#D4D4D4 dark / #333 light — not #000) -->
+    <Style x:Key="DriveChipToggleStyle" TargetType="ToggleButton">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="8,2"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="3"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                <!-- Darker muted text on accent (not pure black / not bright white) -->
+                <Setter Property="Foreground" Value="#D4D4D4"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
   <DockPanel>
     <!-- Custom title bar: title + version, rebuild, help, minimize, maximize, close -->
@@ -195,12 +231,17 @@
               ToolTip="Minimize"
               Click="MinimizeButton_Click"
               shell:WindowChrome.IsHitTestVisibleInChrome="True">
-        <!-- Segoe MDL2 ChromeMinimize (E921): same visual weight as maximize □ (~10–12px), centered -->
-        <TextBlock FontFamily="Segoe MDL2 Assets"
-                   Text="&#xE921;"
-                   FontSize="10"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"/>
+        <!-- Thin min bar (~10×1.25): Path stroke matches Max □ outline weight; no MDL2 E921 baseline float -->
+        <Path Data="M0,0.625 H10"
+              Width="10" Height="1.25"
+              Stretch="None"
+              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+              StrokeThickness="1.25"
+              StrokeStartLineCap="Flat"
+              StrokeEndLineCap="Flat"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              SnapsToDevicePixels="True"/>
       </Button>
       <Button Grid.Column="4"
               Style="{StaticResource ChromeButtonStyle}"
@@ -661,11 +702,9 @@
                             Padding="8,2"
                             MinWidth="36"
                             FontWeight="SemiBold"
-                            Background="{StaticResource PanelBrush}"
-                            Foreground="{StaticResource FgBrush}"
-                            BorderBrush="{StaticResource BorderBrush}"
                             Cursor="Hand"
-                            ToolTip="Toggle drive in results"/>
+                            ToolTip="Toggle drive in results"
+                            Style="{StaticResource DriveChipToggleStyle}"/>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

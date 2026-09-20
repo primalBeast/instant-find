@@ -649,15 +649,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             PersistCommonExcludes();
             if (choice == IndexSyncDialog.Choice.Yes && !string.IsNullOrEmpty(prefix))
-            {
-                var p = prefix;
-                _ = Task.Run(() =>
-                {
-                    try { _indexer.CrawlIntoExisting(p); }
-                    catch (Exception ex) { ErrorLog.AppendFailure("CrawlIntoExisting", ex, failedPath: p); }
-                    _dispatcher.BeginInvoke(() => ScheduleSearch());
-                });
-            }
+                StartCrawlIntoExisting(prefix);
         }
 
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
@@ -724,17 +716,64 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SyncCustomExcludesToSettings();
         PersistSettings();
         if (choice == IndexSyncDialog.Choice.Yes)
-        {
-            var p = match;
-            _ = Task.Run(() =>
-            {
-                try { _indexer.CrawlIntoExisting(p); }
-                catch (Exception ex) { ErrorLog.AppendFailure("CrawlIntoExisting", ex, failedPath: p); }
-                _dispatcher.BeginInvoke(() => ScheduleSearch());
-            });
-        }
+            StartCrawlIntoExisting(match);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveFilters)));
         ScheduleSearch();
+    }
+
+    /// <summary>
+    /// Re-index a previously excluded folder into the live DB with status-strip progress.
+    /// Cancel via the Index button (IsIndexing → Cancel → FileIndexer.Cancel).
+    /// </summary>
+    private void StartCrawlIntoExisting(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || IsIndexing)
+            return;
+
+        IsIndexing = true;
+        StatusText = "0 items indexed - Indexing…";
+
+        var progress = new Progress<IndexProgress>(p =>
+        {
+            if (p.Error is not null)
+            {
+                StatusText = p.Error;
+                return;
+            }
+            if (!p.IsComplete && p.Message is not null)
+                StatusText = p.Message;
+            else if (!p.IsComplete)
+                StatusText = $"{p.FilesIndexed:N0} items indexed - Indexing…";
+        });
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _indexer.CrawlIntoExisting(path, progress);
+            }
+            catch (OperationCanceledException)
+            {
+                /* reported via progress */
+            }
+            catch (Exception ex)
+            {
+                ErrorLog.AppendFailure("CrawlIntoExisting", ex, failedPath: path);
+                _dispatcher.BeginInvoke(() =>
+                {
+                    StatusText = "Index failed: " + ex.Message;
+                });
+            }
+            finally
+            {
+                _dispatcher.BeginInvoke(() =>
+                {
+                    IsIndexing = false;
+                    // Drop "Indexing…" — restore Ready / results via search refresh
+                    ScheduleSearch();
+                });
+            }
+        });
     }
 
     private void CopyFullPath()

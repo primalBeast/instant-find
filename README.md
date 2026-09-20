@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.26) | https://github.com/primalBeast/instant-find/releases/download/v1.0.26/InstantFind-win-x64.zip |
+| Direct zip (v1.0.27) | https://github.com/primalBeast/instant-find/releases/download/v1.0.27/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -51,9 +51,11 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.26)
+## Features (v1.0.27)
 
-- **Caption chrome (v1.0.26)**: Minimize uses Segoe MDL2 `E921` at ~10–12px (same weight as maximize); ~12px gap between Help and Min; Min·Max·Close stay tight. WindowChrome still applied on `SourceInitialized` with system-chrome fallback (v1.0.25).
+- **Caption chrome (v1.0.27)**: Minimize is a thin Path bar (~10×1.25, stroke ~1.25) centered in the 46× chrome hit-box (H/V Center — no MDL2 `E921` / TextBlock baseline float); width ≤ Max □. Keep ~12px Help–Min gap; Min·Max·Close tight. WindowChrome still applied on `SourceInitialized` with system-chrome fallback (v1.0.25).
+- **Drive chips (v1.0.27)**: Selected = accent fill + darker muted text (`#D4D4D4` dark / `#333` light — not pure black); unselected dimmer (`MutedBrush`).
+- **Exclude re-crawl progress (v1.0.27)**: `CrawlIntoExisting` status `{N:N0} items indexed - Indexing…`; UI ≤ every 200 ms; no path chatter; drops Indexing… when done; Cancel (header Index button) works.
 - **Filter popup (v1.0.26)**: Your folders (+ add) above Common folders; size chips ascending (<100KB → >100MB); Date modified Today → Yesterday → This week → This month → This year; popup max height tracks host window (scroll only if needed).
 - **Exclude index sync (v1.0.26)**: Checking/adding an exclude asks to remove folders from the index (`PurgePrefix`) or hide in results only; unchecking/removing asks to crawl into the live index (`CrawlIntoExisting`) or show if already indexed — Cancel reverts. Never ClearAll / full rebuild. Watcher no-ops under active excludes.
 - **Clear × (v1.0.26)**: Immediately left of Filter (`search → … → × · Filter · And/Or · spinner`); tooltip "Clear search."
@@ -93,7 +95,7 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 - **Size & Date Modified (v1.0.6)**: shown from the **SQLite index** (set at crawl / FileWatcher `IndexSinglePath`), not live disk on every search. Silent refresh and re-search now update Size/Modified **in place** when paths are unchanged but metadata changed (so the grid repaints without clearing selection / context menu)
 - **Morphing Rebuild/Cancel (v1.0.6)**: one header button — idle shows **Rebuild Index** (accent) with Yes/No confirm; while indexing it becomes **Cancel** (danger outline) and stops the rebuild; returns to Rebuild Index when done or cancelled
 
-## Query syntax (v1.0.26)
+## Query syntax (v1.0.27)
 
 | Syntax | Meaning |
 |--------|---------|
@@ -136,8 +138,8 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 Triggers:
 
-1. **Tag** — push a version tag: `git tag v1.0.26 && git push origin v1.0.26`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.26`
+1. **Tag** — push a version tag: `git tag v1.0.27 && git push origin v1.0.27`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.27`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 

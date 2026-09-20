@@ -605,54 +605,117 @@ public sealed class FileIndexer
     /// <summary>
     /// Incrementally crawl <paramref name="prefix"/> into the live index DB.
     /// Soft-skips locked files; respects other active excludes; never ClearAll / swap.
+    /// Progress reports count only (no path chatter), throttled to ≤ every 200 ms.
+    /// Cancel via <see cref="Cancel"/>.
     /// </summary>
-    public void CrawlIntoExisting(string prefix, CancellationToken ct = default)
+    public void CrawlIntoExisting(string prefix, IProgress<IndexProgress>? progress = null, CancellationToken externalToken = default)
     {
         if (string.IsNullOrWhiteSpace(prefix) || !Directory.Exists(prefix))
             return;
 
-        var exclude = new HashSet<string>(
-            _settings.ExcludedDirectoryNames ?? new List<string>(),
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var n in ExcludePaths.PathPrefixControlledNames)
-            exclude.Remove(n);
-
-        // Active excludes except the prefix we are (re)adding
-        var normalizedTarget = ExcludePaths.NormalizePrefix(prefix);
-        var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings)
-            .Where(p => !string.Equals(p, normalizedTarget, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        var pending = new ConcurrentQueue<string>();
-        pending.Enqueue(prefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        var localBatch = new List<FileEntry>(256);
-        long filesIndexed = 0;
-        long skippedLocked = 0;
-
-        while (pending.TryDequeue(out var dir))
+        if (IsRunning)
         {
-            ct.ThrowIfCancellationRequested();
-            EnumerateDirectory(
-                dir,
-                exclude,
-                excludePrefixes,
-                pending,
-                localBatch,
-                ref filesIndexed,
-                ref skippedLocked,
-                progress: null,
-                ct,
-                _db);
-
-            if (localBatch.Count >= 200)
-            {
-                SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
-                localBatch.Clear();
-            }
+            ErrorLog.AppendNote("CrawlIgnored", "CrawlIntoExisting requested while indexing already running.");
+            return;
         }
 
-        if (localBatch.Count > 0)
-            SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+        _cts?.Cancel();
+        try { _cts?.Dispose(); } catch { /* prior CTS may already be disposed */ }
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+        var ct = _cts.Token;
+        IsRunning = true;
+
+        try
+        {
+            var exclude = new HashSet<string>(
+                _settings.ExcludedDirectoryNames ?? new List<string>(),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var n in ExcludePaths.PathPrefixControlledNames)
+                exclude.Remove(n);
+
+            // Active excludes except the prefix we are (re)adding
+            var normalizedTarget = ExcludePaths.NormalizePrefix(prefix);
+            var excludePrefixes = ExcludePaths.ResolveActivePrefixes(_settings)
+                .Where(p => !string.Equals(p, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var pending = new ConcurrentQueue<string>();
+            pending.Enqueue(prefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var localBatch = new List<FileEntry>(256);
+            long filesIndexed = 0;
+            long skippedLocked = 0;
+            long lastUiTick = 0;
+            const long uiMinIntervalMs = 200;
+
+            void ReportCrawlUi(long count, bool force = false)
+            {
+                if (progress is null) return;
+                var now = Environment.TickCount64;
+                if (!force && lastUiTick != 0 && now - lastUiTick < uiMinIntervalMs)
+                    return;
+                lastUiTick = now;
+                progress.Report(new IndexProgress
+                {
+                    FilesIndexed = count,
+                    SkippedLocked = Interlocked.Read(ref skippedLocked),
+                    IsComplete = false,
+                    Message = $"{count:N0} items indexed - Indexing…"
+                });
+            }
+
+            // Bridge EnumerateDirectory reports → throttled count-only UI (no path chatter)
+            IProgress<IndexProgress>? uiProgress = progress is null
+                ? null
+                : new Progress<IndexProgress>(p => ReportCrawlUi(p.FilesIndexed));
+
+            ReportCrawlUi(0, force: true);
+
+            while (pending.TryDequeue(out var dir))
+            {
+                ct.ThrowIfCancellationRequested();
+                EnumerateDirectory(
+                    dir,
+                    exclude,
+                    excludePrefixes,
+                    pending,
+                    localBatch,
+                    ref filesIndexed,
+                    ref skippedLocked,
+                    uiProgress,
+                    ct,
+                    _db);
+
+                if (localBatch.Count >= 200)
+                {
+                    SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+                    localBatch.Clear();
+                }
+            }
+
+            if (localBatch.Count > 0)
+                SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+
+            var finalCount = Interlocked.Read(ref filesIndexed);
+            // Final tick so UI sees last count; VM clears "Indexing…" after IsIndexing=false
+            progress?.Report(new IndexProgress
+            {
+                FilesIndexed = finalCount,
+                SkippedLocked = Interlocked.Read(ref skippedLocked),
+                IsComplete = true
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            progress?.Report(new IndexProgress
+            {
+                IsComplete = true,
+                Error = "Indexing cancelled."
+            });
+        }
+        finally
+        {
+            IsRunning = false;
+        }
     }
 
     public void IndexSinglePath(string path)
