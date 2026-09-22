@@ -15,7 +15,8 @@ namespace InstantFind.Services;
 public static class ReparseCrawlGate
 {
     // winnt.h — Cloud Files family (IO_REPARSE_TAG_CLOUD … CLOUD_F)
-    private const uint IoReparseTagCloudMask = 0xF000FFFF;
+    // Clears the Cloud Files flags nibble (bits 12–15); matches CLOUD…CLOUD_F.
+    private const uint IoReparseTagCloudMask = 0xFFFF0FFF;
     private const uint IoReparseTagCloudBase = 0x9000001A;
 
     // Win32 FILE_ATTRIBUTE_* — not always present on net*-windows reference assemblies
