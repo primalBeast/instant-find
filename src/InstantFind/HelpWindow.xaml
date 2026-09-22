@@ -364,6 +364,8 @@
               <TextBlock Style="{StaticResource SectionTitle}" Text="Index"/>
               <TextBlock Style="{StaticResource SectionBlurb}"
                          Text="Rebuild Index scans local drives in user mode (SQLite + FileSystemWatcher). Cancel stops a rebuild safely."/>
+              <TextBlock Style="{StaticResource SectionBlurb}" Margin="0,6,0,0"
+                         Text="OneDrive / Files On-Demand folders are indexed by name only (no download)."/>
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="200"/>

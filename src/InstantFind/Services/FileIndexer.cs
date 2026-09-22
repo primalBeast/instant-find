@@ -8,6 +8,10 @@ namespace InstantFind.Services;
 /// <summary>
 /// User-mode parallel indexer using Directory.EnumerateFileSystemEntries.
 /// Skips inaccessible / locked files and directories. No drivers, no MFT/USN.
+/// Directory reparse points that are junctions/mount points are skipped to avoid
+/// cycles; OneDrive / Cloud Files reparse dirs are entered (metadata only —
+/// Enumerate + GetAttributes; never open/hydrate content). Network / cloud
+/// drive-letter pruning is unchanged (see DriveHelpers).
 /// Full rebuilds write to a temporary DB and atomically swap on success so
 /// cancel/crash never leaves a tiny partial live index.
 /// </summary>
@@ -475,8 +479,10 @@ public sealed class FileIndexer
                 try
                 {
                     var attrs = File.GetAttributes(entryPath);
-                    // Skip directory reparse points to avoid cycles / junction storms
-                    if ((attrs & FileAttributes.ReparsePoint) != 0 && (attrs & FileAttributes.Directory) != 0)
+                    // Skip junction/mount-point cycles; enter OneDrive / Cloud Files (metadata only)
+                    if ((attrs & FileAttributes.ReparsePoint) != 0
+                        && (attrs & FileAttributes.Directory) != 0
+                        && !ReparseCrawlGate.ShouldEnterDirectoryReparsePoint(entryPath, attrs))
                         continue;
                     isDir = (attrs & FileAttributes.Directory) != 0;
                 }

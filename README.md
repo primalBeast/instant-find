@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.27) | https://github.com/primalBeast/instant-find/releases/download/v1.0.27/InstantFind-win-x64.zip |
+| Direct zip (v1.0.28) | https://github.com/primalBeast/instant-find/releases/download/v1.0.28/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -51,8 +51,9 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.27)
+## Features (v1.0.28)
 
+- **OneDrive / Files On-Demand crawl (v1.0.28)**: Indexer still skips junction/mount-point reparse dirs (cycle safety) but **enters** OneDrive / Cloud Files directories (reparse tag `IO_REPARSE_TAG_CLOUD*`, `RecallOnDataAccess` / `RecallOnOpen`, or path segments named `OneDrive*`). Placeholder names + attributes via Enumerate / GetAttributes only — **never** opens or hydrates file content. Mapped cloud drive letters (G: Google Drive, etc.) stay pruned. Help → Index notes name-only indexing.
 - **Caption chrome (v1.0.27)**: Minimize is a thin Path bar (~10×1.25, stroke ~1.25) centered in the 46× chrome hit-box (H/V Center — no MDL2 `E921` / TextBlock baseline float); width ≤ Max □. Keep ~12px Help–Min gap; Min·Max·Close tight. WindowChrome still applied on `SourceInitialized` with system-chrome fallback (v1.0.25).
 - **Drive chips (v1.0.27)**: Selected = accent fill + darker muted text (`#D4D4D4` dark / `#333` light — not pure black); unselected dimmer (`MutedBrush`).
 - **Exclude re-crawl progress (v1.0.27)**: `CrawlIntoExisting` status `{N:N0} items indexed - Indexing…`; UI ≤ every 200 ms; no path chatter; drops Indexing… when done; Cancel (header Index button) works.
@@ -139,7 +140,7 @@ Workflow: [`.github/workflows/release.yml`](.github/workflows/release.yml)
 Triggers:
 
 1. **Tag** — push a version tag: `git tag v1.0.27 && git push origin v1.0.27`
-2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.27`
+2. **Manual** — Actions → **Build & Release** → **Run workflow** with `version=1.0.28`
 
 Produces `InstantFind-win-x64.zip` on the Release assets.
 
