@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -33,6 +34,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         StartupLog.Append("OnStartup.Begin", $"args={e.Args.Length}");
+
+        // Eco-friendly: documented BelowNormal priority — no undocumented efficiency APIs, no USN/MFT shortcuts.
+        try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; }
+        catch { /* soft-fail on restricted hosts */ }
 
         DispatcherUnhandledException += App_DispatcherUnhandledException;
 

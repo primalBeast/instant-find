@@ -366,6 +366,8 @@
                          Text="Rebuild Index scans local drives in user mode (SQLite + FileSystemWatcher). Cancel stops a rebuild safely."/>
               <TextBlock Style="{StaticResource SectionBlurb}" Margin="0,6,0,0"
                          Text="OneDrive / Files On-Demand folders are indexed by name only (no download)."/>
+              <TextBlock Style="{StaticResource SectionBlurb}" Margin="0,6,0,0"
+                         Text="Live updates are batched every few seconds and skip Temp / cache folders; Rebuild Index still covers them."/>
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="200"/>

@@ -67,6 +67,9 @@ public partial class MainWindow : Window
             };
             SourceInitialized += MainWindow_SourceInitialized;
             Loaded += MainWindow_Loaded;
+            StateChanged += (_, _) => SyncUiRefreshPaused();
+            Activated += (_, _) => SyncUiRefreshPaused();
+            Deactivated += (_, _) => SyncUiRefreshPaused();
             ContentRendered += (_, _) => StartupLog.Append(
                 "MainWindow.ContentRendered",
                 $"state={WindowState} vis={Visibility} chrome={_customChromeApplied}");
@@ -160,6 +163,8 @@ public partial class MainWindow : Window
                 Activate();
                 StartupLog.Append("MainWindow.Loaded.ForceShowActivate");
             }
+
+            SyncUiRefreshPaused();
         }
         catch (Exception ex)
         {
@@ -343,6 +348,22 @@ public partial class MainWindow : Window
             SearchBox.Focus();
             SearchBox.SelectAll();
             e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Pause watcher-driven silent result refresh while minimized or not foreground.
+    /// </summary>
+    private void SyncUiRefreshPaused()
+    {
+        try
+        {
+            var paused = WindowState == WindowState.Minimized || !IsActive;
+            _vm.SetUiRefreshPaused(paused);
+        }
+        catch
+        {
+            // soft-fail — never break chrome from pause sync
         }
     }
 

@@ -35,6 +35,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _syncingMode;
     private bool _isContextMenuOpen;
     private bool _silentRefreshPending;
+    private bool _uiRefreshPaused;
+    private bool _isOpening;
+    private string? _statusBeforeOpening;
+    private DispatcherTimer? _openingTimer;
     private FileEntry? _contextTarget;
     private bool _isFilterPopupOpen;
     private bool _suppressExcludeSync;
@@ -52,7 +56,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _db = new IndexDatabase(_settingsService.DatabasePath);
         _db.Open();
         _indexer = new FileIndexer(_db, _settings);
-        _watcher = new FileWatcherService(_db, _indexer);
+        _watcher = new FileWatcherService(_db, _indexer, _settings);
         _search = new SearchService(_db, _settings);
         _watcher.IndexMutated += OnIndexMutated;
 
@@ -209,6 +213,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _isSearching, value);
     }
 
+    /// <summary>
+    /// True while an Open / Open with / editor shell handoff is in flight. Drives the centered
+    /// Opening… overlay on the results area (separate from the search-bar IsSearching ring).
+    /// </summary>
+    public bool IsOpening
+    {
+        get => _isOpening;
+        private set => Set(ref _isOpening, value);
+    }
+
     public bool MatchCase
     {
         get => _matchCase;
@@ -335,10 +349,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!Set(ref _isContextMenuOpen, value)) return;
             if (!value && _silentRefreshPending)
             {
+                // Keep pending until restore if the window is minimized / inactive.
+                if (_uiRefreshPaused)
+                    return;
                 _silentRefreshPending = false;
                 if (!IsIndexing && !string.IsNullOrWhiteSpace(Query))
                     _ = RunSilentRefreshAsync();
             }
+        }
+    }
+
+    /// <summary>
+    /// Called from MainWindow when minimized or deactivated so watcher-driven silent refresh
+    /// is deferred (no status flicker). One deferred refresh runs on restore/activate if needed.
+    /// </summary>
+    public void SetUiRefreshPaused(bool paused)
+    {
+        if (_uiRefreshPaused == paused)
+            return;
+        _uiRefreshPaused = paused;
+        _watcher.SetUiRefreshPaused(paused);
+        if (!paused && _silentRefreshPending)
+        {
+            _silentRefreshPending = false;
+            if (!IsIndexing && !string.IsNullOrWhiteSpace(Query))
+                _ = RunSilentRefreshAsync();
         }
     }
 
@@ -511,13 +546,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (string.IsNullOrWhiteSpace(Query)) return;
 
         // Silent path: never ScheduleSearch (that sets spinner / "Searching…").
-        // Watcher already debounce-coalesces (~350ms); re-query off UI thread.
+        // Watcher coalesce-flushes (~1.5s active / ~6s minimized); re-query off UI thread.
         // Defer while context menu is open so CanExecute / selection stay stable.
         _dispatcher.BeginInvoke(() =>
         {
             if (IsIndexing) return;
             if (string.IsNullOrWhiteSpace(Query)) return;
-            if (IsContextMenuOpen)
+            if (IsContextMenuOpen || _uiRefreshPaused)
             {
                 _silentRefreshPending = true;
                 return;
@@ -1101,15 +1136,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (target is null) return;
         try
         {
+            BeginOpening();
             var psi = new ProcessStartInfo
             {
                 FileName = target.FullPath,
                 UseShellExecute = true
             };
             Process.Start(psi);
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show("Could not open: " + ex.Message, "Instant Find", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -1120,6 +1158,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (target is null) return;
         try
         {
+            BeginOpening();
             if (target.IsDirectory)
             {
                 Process.Start(new ProcessStartInfo
@@ -1137,9 +1176,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     UseShellExecute = true
                 });
             }
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show("Could not open folder: " + ex.Message, "Instant Find", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -1162,15 +1203,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
+            BeginOpening();
             Process.Start(new ProcessStartInfo
             {
                 FileName = npp,
                 Arguments = $"\"{target.FullPath}\"",
                 UseShellExecute = false
             });
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show(
                 "Could not start Notepad++: " + ex.Message,
                 "Instant Find",
@@ -1196,15 +1240,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
+            BeginOpening();
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
                 Arguments = $"/k cd /d \"{folder}\"",
                 UseShellExecute = true
             });
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show(
                 "Could not open Command Prompt: " + ex.Message,
                 "Instant Find",
@@ -1231,15 +1278,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
+            BeginOpening();
             Process.Start(new ProcessStartInfo
             {
                 FileName = bash,
                 Arguments = $"--cd=\"{folder}\"",
                 UseShellExecute = false
             });
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show(
                 "Could not start Git Bash: " + ex.Message,
                 "Instant Find",
@@ -1266,6 +1316,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
+            BeginOpening();
             Process.Start(new ProcessStartInfo
             {
                 FileName = exePath,
@@ -1273,14 +1324,56 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 UseShellExecute = false
             });
             RememberOpenWithFavorite(exePath);
+            ScheduleEndOpening();
         }
         catch (Exception ex)
         {
+            CancelOpening();
             MessageBox.Show(
                 "Could not open with that app: " + ex.Message,
                 "Instant Find",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
+        }
+    }
+
+    private void BeginOpening()
+    {
+        if (!IsOpening)
+            _statusBeforeOpening = StatusText;
+        IsOpening = true;
+        StatusText = "Opening…";
+    }
+
+    /// <summary>Process.Start returned — hold the overlay ~600ms, then restore status.</summary>
+    private void ScheduleEndOpening()
+    {
+        _openingTimer?.Stop();
+        _openingTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _openingTimer.Tick -= OpeningTimer_Tick;
+        _openingTimer.Tick += OpeningTimer_Tick;
+        _openingTimer.Start();
+    }
+
+    private void OpeningTimer_Tick(object? sender, EventArgs e)
+    {
+        _openingTimer?.Stop();
+        EndOpeningRestoreStatus();
+    }
+
+    private void CancelOpening()
+    {
+        _openingTimer?.Stop();
+        EndOpeningRestoreStatus();
+    }
+
+    private void EndOpeningRestoreStatus()
+    {
+        IsOpening = false;
+        if (_statusBeforeOpening is not null)
+        {
+            StatusText = _statusBeforeOpening;
+            _statusBeforeOpening = null;
         }
     }
 
@@ -1424,6 +1517,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Interlocked.Increment(ref _searchGeneration);
         _debounce.Stop();
+        _openingTimer?.Stop();
         _watcher.IndexMutated -= OnIndexMutated;
         _watcher.Dispose();
         _indexer.Cancel();

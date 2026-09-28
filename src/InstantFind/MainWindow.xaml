@@ -136,23 +136,24 @@
              Foreground="{StaticResource MutedBrush}"
              BaselineAlignment="Baseline"/>
       </TextBlock>
+      <!-- Quiet ghost Rebuild/Cancel — matches Help/? chrome weight, not a solid accent pill -->
       <Button Grid.Column="1"
               Content="{Binding IndexButtonText}"
               Command="{Binding IndexButtonCommand}"
-              Padding="12,6"
-              MinWidth="128"
+              Padding="8,4"
               Margin="0,0,8,0"
               VerticalAlignment="Center"
               Cursor="Hand"
-              FontWeight="SemiBold"
-              BorderThickness="1"
+              FontWeight="Normal"
+              FontSize="12"
+              BorderThickness="0"
               SnapsToDevicePixels="True"
               shell:WindowChrome.IsHitTestVisibleInChrome="True">
         <Button.Style>
           <Style TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
             <Setter Property="Template">
               <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -169,10 +170,10 @@
                   </Border>
                   <ControlTemplate.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                      <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+                      <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelBrush}"/>
                     </Trigger>
                     <Trigger Property="IsPressed" Value="True">
-                      <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
+                      <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
                     </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                       <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
@@ -183,9 +184,9 @@
             </Setter>
             <Style.Triggers>
               <DataTrigger Binding="{Binding IsIndexing}" Value="True">
-                <Setter Property="Background" Value="#2D1E1E"/>
+                <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Foreground" Value="#F14C4C"/>
-                <Setter Property="BorderBrush" Value="#F14C4C"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
               </DataTrigger>
             </Style.Triggers>
           </Style>
@@ -711,106 +712,160 @@
       </StatusBarItem>
     </StatusBar>
 
-    <!-- Results -->
-    <DataGrid x:Name="ResultsGrid"
-              ItemsSource="{Binding Results}"
-              SelectedItem="{Binding SelectedItem}"
-              AutoGenerateColumns="False"
-              IsReadOnly="True"
-              CanUserAddRows="False"
-              CanUserDeleteRows="False"
-              CanUserResizeRows="False"
-              SelectionMode="Single"
-              SelectionUnit="FullRow"
-              HeadersVisibility="Column"
-              GridLinesVisibility="Horizontal"
-              RowHeaderWidth="0"
-              Background="{StaticResource BgBrush}"
-              Foreground="{StaticResource FgBrush}"
-              BorderBrush="{StaticResource BorderBrush}"
-              RowBackground="{StaticResource BgBrush}"
-              AlternatingRowBackground="{StaticResource PanelBrush}"
-              HorizontalGridLinesBrush="{StaticResource BorderBrush}"
-              MouseDoubleClick="ResultsGrid_MouseDoubleClick"
-              PreviewMouseRightButtonDown="ResultsGrid_PreviewMouseRightButtonDown"
-              PreviewMouseLeftButtonDown="ResultsGrid_PreviewMouseLeftButtonDown"
-              MouseMove="ResultsGrid_MouseMove">
-      <DataGrid.Resources>
-        <Style TargetType="DataGridColumnHeader">
-          <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
-          <Setter Property="Foreground" Value="{StaticResource FgBrush}"/>
-          <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-          <Setter Property="Padding" Value="8,4"/>
-        </Style>
-        <Style TargetType="DataGridCell">
-          <Setter Property="BorderThickness" Value="0"/>
-          <Setter Property="Padding" Value="6,2"/>
-          <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-          <Style.Triggers>
-            <Trigger Property="IsSelected" Value="True">
-              <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-              <Setter Property="Foreground" Value="White"/>
-            </Trigger>
-          </Style.Triggers>
-        </Style>
-      </DataGrid.Resources>
-      <DataGrid.Columns>
-        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
-        <DataGridTextColumn x:Name="ExtensionColumn" Header="Extension" Binding="{Binding Extension}" Width="80"
-                           Visibility="Collapsed"/>
-        <DataGridTextColumn Header="Path" Binding="{Binding Directory}" Width="3*"/>
-        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="90"/>
-        <DataGridTextColumn Header="Date Modified" Binding="{Binding ModifiedDisplay}" Width="140"/>
-        <DataGridTextColumn x:Name="AttributesColumn" Header="Attributes" Binding="{Binding AttributesDisplay}" Width="90"
-                           Visibility="Collapsed"/>
-      </DataGrid.Columns>
-      <DataGrid.ContextMenu>
-        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
-                     Opened="ResultsContextMenu_Opened"
-                     Closed="ResultsContextMenu_Closed">
-          <!-- 1. Open · Open containing folder · Open with… -->
-          <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
-          <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
-          <MenuItem Header="Open with…">
-            <MenuItem Header="Favorite apps"
-                      ItemsSource="{Binding OpenWithFavorites}">
-              <MenuItem.ItemContainerStyle>
-                <Style TargetType="MenuItem">
-                  <Setter Property="Header" Value="{Binding DisplayName}"/>
-                  <Setter Property="ToolTip" Value="{Binding ExePath}"/>
-                  <Setter Property="Command"
-                          Value="{Binding DataContext.OpenWithFavoriteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                  <Setter Property="CommandParameter" Value="{Binding ExePath}"/>
-                </Style>
-              </MenuItem.ItemContainerStyle>
+    <!-- Results (+ Opening… overlay) -->
+    <Grid>
+      <DataGrid x:Name="ResultsGrid"
+                ItemsSource="{Binding Results}"
+                SelectedItem="{Binding SelectedItem}"
+                AutoGenerateColumns="False"
+                IsReadOnly="True"
+                CanUserAddRows="False"
+                CanUserDeleteRows="False"
+                CanUserResizeRows="False"
+                SelectionMode="Single"
+                SelectionUnit="FullRow"
+                HeadersVisibility="Column"
+                GridLinesVisibility="Horizontal"
+                RowHeaderWidth="0"
+                Background="{StaticResource BgBrush}"
+                Foreground="{StaticResource FgBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                RowBackground="{StaticResource BgBrush}"
+                AlternatingRowBackground="{StaticResource PanelBrush}"
+                HorizontalGridLinesBrush="{StaticResource BorderBrush}"
+                MouseDoubleClick="ResultsGrid_MouseDoubleClick"
+                PreviewMouseRightButtonDown="ResultsGrid_PreviewMouseRightButtonDown"
+                PreviewMouseLeftButtonDown="ResultsGrid_PreviewMouseLeftButtonDown"
+                MouseMove="ResultsGrid_MouseMove">
+        <DataGrid.Resources>
+          <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource FgBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Padding" Value="8,4"/>
+          </Style>
+          <Style TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Style.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+              </Trigger>
+            </Style.Triggers>
+          </Style>
+        </DataGrid.Resources>
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+          <DataGridTextColumn x:Name="ExtensionColumn" Header="Extension" Binding="{Binding Extension}" Width="80"
+                             Visibility="Collapsed"/>
+          <DataGridTextColumn Header="Path" Binding="{Binding Directory}" Width="3*"/>
+          <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="90"/>
+          <DataGridTextColumn Header="Date Modified" Binding="{Binding ModifiedDisplay}" Width="140"/>
+          <DataGridTextColumn x:Name="AttributesColumn" Header="Attributes" Binding="{Binding AttributesDisplay}" Width="90"
+                             Visibility="Collapsed"/>
+        </DataGrid.Columns>
+        <DataGrid.ContextMenu>
+          <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                       Opened="ResultsContextMenu_Opened"
+                       Closed="ResultsContextMenu_Closed">
+            <!-- 1. Open · Open containing folder · Open with… -->
+            <MenuItem Header="Open" Command="{Binding OpenCommand}"/>
+            <MenuItem Header="Open Containing Folder" Command="{Binding OpenFolderCommand}"/>
+            <MenuItem Header="Open with…">
+              <MenuItem Header="Favorite apps"
+                        ItemsSource="{Binding OpenWithFavorites}">
+                <MenuItem.ItemContainerStyle>
+                  <Style TargetType="MenuItem">
+                    <Setter Property="Header" Value="{Binding DisplayName}"/>
+                    <Setter Property="ToolTip" Value="{Binding ExePath}"/>
+                    <Setter Property="Command"
+                            Value="{Binding DataContext.OpenWithFavoriteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    <Setter Property="CommandParameter" Value="{Binding ExePath}"/>
+                  </Style>
+                </MenuItem.ItemContainerStyle>
+              </MenuItem>
+              <Separator/>
+              <MenuItem Header="Choose another app…" Command="{Binding ChooseOpenWithAppCommand}"/>
             </MenuItem>
             <Separator/>
-            <MenuItem Header="Choose another app…" Command="{Binding ChooseOpenWithAppCommand}"/>
-          </MenuItem>
-          <Separator/>
-          <!-- 2. Copy full path · Copy containing path -->
-          <MenuItem Header="Copy full path" Command="{Binding CopyFullPathCommand}"/>
-          <MenuItem Header="Copy containing path" Command="{Binding CopyContainingPathCommand}"/>
-          <Separator/>
-          <!-- 3. Edit with Notepad++ · Open in Cmd · Open in Git Bash -->
-          <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
-          <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
-          <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>
-          <Separator/>
-          <!-- 4. Show Extension · Show Attributes -->
-          <MenuItem Header="Show Extension column"
-                    IsCheckable="True"
-                    IsChecked="{Binding ShowExtensionColumn, Mode=TwoWay}"/>
-          <MenuItem Header="Show Attributes column"
-                    IsCheckable="True"
-                    IsChecked="{Binding ShowAttributesColumn, Mode=TwoWay}"/>
-        </ContextMenu>
-      </DataGrid.ContextMenu>
-      <DataGrid.InputBindings>
-        <KeyBinding Key="Enter" Command="{Binding OpenCommand}"/>
-        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding OpenFolderCommand}"/>
-      </DataGrid.InputBindings>
-    </DataGrid>
+            <!-- 2. Copy full path · Copy containing path -->
+            <MenuItem Header="Copy full path" Command="{Binding CopyFullPathCommand}"/>
+            <MenuItem Header="Copy containing path" Command="{Binding CopyContainingPathCommand}"/>
+            <Separator/>
+            <!-- 3. Edit with Notepad++ · Open in Cmd · Open in Git Bash -->
+            <MenuItem Header="Edit with Notepad++" Command="{Binding EditWithNotepadPpCommand}"/>
+            <MenuItem Header="Open path in Command Prompt" Command="{Binding OpenInCmdCommand}"/>
+            <MenuItem Header="Open path in Git Bash" Command="{Binding OpenInGitBashCommand}"/>
+            <Separator/>
+            <!-- 4. Show Extension · Show Attributes -->
+            <MenuItem Header="Show Extension column"
+                      IsCheckable="True"
+                      IsChecked="{Binding ShowExtensionColumn, Mode=TwoWay}"/>
+            <MenuItem Header="Show Attributes column"
+                      IsCheckable="True"
+                      IsChecked="{Binding ShowAttributesColumn, Mode=TwoWay}"/>
+          </ContextMenu>
+        </DataGrid.ContextMenu>
+        <DataGrid.InputBindings>
+          <KeyBinding Key="Enter" Command="{Binding OpenCommand}"/>
+          <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding OpenFolderCommand}"/>
+        </DataGrid.InputBindings>
+      </DataGrid>
+      <!-- Opening… overlay: centered indeterminate ring + muted label over results (shell handoff only) -->
+      <Border IsHitTestVisible="False"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Padding="18,14"
+              CornerRadius="6"
+              Background="#CC1E1E1E"
+              Visibility="{Binding IsOpening, Converter={StaticResource BoolToVis}}">
+        <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+          <Viewbox Width="32" Height="32" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
+              <Canvas.RenderTransform>
+                <RotateTransform Angle="0"/>
+              </Canvas.RenderTransform>
+              <Canvas.Style>
+                <Style TargetType="Canvas">
+                  <Style.Triggers>
+                    <Trigger Property="IsVisible" Value="True">
+                      <Trigger.EnterActions>
+                        <BeginStoryboard x:Name="OpeningSpin">
+                          <Storyboard RepeatBehavior="Forever">
+                            <DoubleAnimation
+                                Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                From="0" To="360"
+                                Duration="0:0:0.75"/>
+                          </Storyboard>
+                        </BeginStoryboard>
+                      </Trigger.EnterActions>
+                      <Trigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="OpeningSpin"/>
+                      </Trigger.ExitActions>
+                    </Trigger>
+                  </Style.Triggers>
+                </Style>
+              </Canvas.Style>
+              <Ellipse Canvas.Left="1" Canvas.Top="1"
+                       Width="18" Height="18"
+                       Stroke="#3F3F46" StrokeThickness="2.5"/>
+              <Path Stroke="{StaticResource AccentBrush}"
+                    StrokeThickness="2.5"
+                    StrokeStartLineCap="Round"
+                    StrokeEndLineCap="Round"
+                    Data="M 10,2 A 8,8 0 1 1 2.34,12.34"/>
+            </Canvas>
+          </Viewbox>
+          <TextBlock Text="Opening…"
+                     Margin="0,8,0,0"
+                     HorizontalAlignment="Center"
+                     FontSize="12"
+                     Foreground="{StaticResource MutedBrush}"/>
+        </StackPanel>
+      </Border>
+    </Grid>
     </DockPanel>
   </DockPanel>
 </Window>

@@ -1,34 +1,54 @@
 using System.IO;
+using InstantFind.Models;
 
 namespace InstantFind.Services;
 
 /// <summary>
 /// Incremental updates via FileSystemWatcher (user-mode). No USN journal.
+/// Callbacks only enqueue; a timed flush applies one delete batch + one UpsertBatch.
 /// </summary>
 public sealed class FileWatcherService : IDisposable
 {
     private readonly IndexDatabase _db;
     private readonly FileIndexer _indexer;
+    private readonly AppSettings _settings;
     private readonly List<FileSystemWatcher> _watchers = new();
     private readonly object _gate = new();
-    private readonly object _debounceGate = new();
-    private Timer? _debounceTimer;
+    private readonly object _flushGate = new();
+    private readonly WatcherCoalesceBuffer _buffer = new();
+    private Timer? _flushTimer;
     private int _pruneScheduled;
     private int _paused;
-    private const int DebounceMs = 350;
+    private int _uiPaused;
+    private int _flushBusy;
+
+    // Active window: ~1.5s; minimized / not foreground: ~6s (avoid restore catch-up storm).
+    private const int ActiveFlushMs = 1500;
+    private const int PausedFlushMs = 6000;
     // FileSystemWatcher max InternalBufferSize is 64 KiB on Windows.
     private const int WatcherBufferSize = 64 * 1024;
 
     /// <summary>
-    /// Raised (debounced) after a successful create/change/delete/rename index update.
+    /// Raised once after a successful flush that applied at least one path op (or prune).
     /// Subscribers should re-run the active search on the UI thread.
     /// </summary>
     public event Action? IndexMutated;
 
-    public FileWatcherService(IndexDatabase db, FileIndexer indexer)
+    public FileWatcherService(IndexDatabase db, FileIndexer indexer, AppSettings settings)
     {
         _db = db;
         _indexer = indexer;
+        _settings = settings;
+    }
+
+    /// <summary>
+    /// When true (window minimized / not active), flush runs on a slower cadence.
+    /// UI silent-refresh gating is handled by MainViewModel.
+    /// </summary>
+    public void SetUiRefreshPaused(bool paused)
+    {
+        Interlocked.Exchange(ref _uiPaused, paused ? 1 : 0);
+        RestartFlushTimer();
     }
 
     public void Start(IEnumerable<string> roots)
@@ -61,14 +81,16 @@ public sealed class FileWatcherService : IDisposable
                 // skip roots we cannot watch
             }
         }
+
+        RestartFlushTimer();
     }
 
     public void Stop()
     {
-        lock (_debounceGate)
+        lock (_flushGate)
         {
-            _debounceTimer?.Dispose();
-            _debounceTimer = null;
+            _flushTimer?.Dispose();
+            _flushTimer = null;
         }
 
         lock (_gate)
@@ -84,6 +106,9 @@ public sealed class FileWatcherService : IDisposable
             }
             _watchers.Clear();
         }
+
+        // Drop pending ops — rebuild / resume will resync.
+        _ = _buffer.Drain();
     }
 
     /// <summary>
@@ -95,6 +120,8 @@ public sealed class FileWatcherService : IDisposable
         Stop();
         for (int i = 0; i < 50 && Volatile.Read(ref _pruneScheduled) != 0; i++)
             Thread.Sleep(20);
+        for (int i = 0; i < 50 && Volatile.Read(ref _flushBusy) != 0; i++)
+            Thread.Sleep(20);
     }
 
     public void ResumeAfterRebuild(IEnumerable<string> roots)
@@ -104,47 +131,40 @@ public sealed class FileWatcherService : IDisposable
     }
 
     private bool IsPaused => Volatile.Read(ref _paused) != 0;
+    private bool IsUiPaused => Volatile.Read(ref _uiPaused) != 0;
 
     private void OnCreated(object sender, FileSystemEventArgs e) =>
         Safe(() =>
         {
-            _indexer.IndexSinglePath(e.FullPath);
-            ScheduleIndexMutated();
+            if (ShouldSkipLive(e.FullPath)) return;
+            _buffer.EnqueueUpsert(e.FullPath);
         });
 
-    // Size/date writes: re-upsert via IndexSinglePath then notify UI to refresh.
     private void OnChanged(object sender, FileSystemEventArgs e) =>
         Safe(() =>
         {
-            _indexer.IndexSinglePath(e.FullPath);
-            ScheduleIndexMutated();
+            if (ShouldSkipLive(e.FullPath)) return;
+            _buffer.EnqueueUpsert(e.FullPath);
         });
 
-    private void OnDeleted(object sender, FileSystemEventArgs e)
-    {
+    private void OnDeleted(object sender, FileSystemEventArgs e) =>
         Safe(() =>
         {
-            _db.DeleteByPath(e.FullPath);
-            // Folder delete: drop children by path AND by directory column
-            _db.DeleteUnderDirectory(e.FullPath);
-            ScheduleIndexMutated();
-            // Light prune under parent in case watcher only fired for the top folder
-            var parent = Path.GetDirectoryName(e.FullPath);
-            if (!string.IsNullOrEmpty(parent))
-                SchedulePrune(parent);
+            if (ShouldSkipLive(e.FullPath)) return;
+            _buffer.EnqueueDelete(e.FullPath);
         });
-    }
 
-    private void OnRenamed(object sender, RenamedEventArgs e)
-    {
+    private void OnRenamed(object sender, RenamedEventArgs e) =>
         Safe(() =>
         {
-            _db.DeleteByPath(e.OldFullPath);
-            _db.DeleteUnderDirectory(e.OldFullPath);
-            _indexer.IndexSinglePath(e.FullPath);
-            ScheduleIndexMutated();
+            var skipOld = ShouldSkipLive(e.OldFullPath);
+            var skipNew = ShouldSkipLive(e.FullPath);
+            if (skipOld && skipNew) return;
+            if (!skipOld)
+                _buffer.EnqueueDelete(e.OldFullPath);
+            if (!skipNew)
+                _buffer.EnqueueUpsert(e.FullPath);
         });
-    }
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
@@ -155,24 +175,113 @@ public sealed class FileWatcherService : IDisposable
         SchedulePrune(root);
     }
 
-    /// <summary>
-    /// Coalesce bursty watcher events (~350ms) so the UI refreshes within ~1s.
-    /// </summary>
-    private void ScheduleIndexMutated()
+    private bool ShouldSkipLive(string path)
     {
-        lock (_debounceGate)
+        if (string.IsNullOrWhiteSpace(path))
+            return true;
+        if (DriveHelpers.IsRemoteRoot(path))
+            return true;
+        return NoisyPathHeuristics.ShouldIgnoreLive(path, GetExcludePrefixes());
+    }
+
+    // Filter excludes can change at runtime; refresh the cached list at most every ~2s.
+    private IReadOnlyList<string> _excludeCache = Array.Empty<string>();
+    private long _excludeCacheTicks;
+    private const long ExcludeCacheTtlMs = 2000;
+
+    private IReadOnlyList<string> GetExcludePrefixes()
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _excludeCacheTicks);
+        if (last == 0 || now - last > ExcludeCacheTtlMs)
         {
-            _debounceTimer?.Dispose();
-            _debounceTimer = new Timer(
-                _ =>
-                {
-                    try { IndexMutated?.Invoke(); }
-                    catch { /* never crash from mutation notify */ }
-                },
-                null,
-                DebounceMs,
-                Timeout.Infinite);
+            try
+            {
+                Volatile.Write(ref _excludeCache, ExcludePaths.ResolveActivePrefixes(_settings));
+                Interlocked.Exchange(ref _excludeCacheTicks, now);
+            }
+            catch
+            {
+                // keep previous cache
+            }
         }
+        return Volatile.Read(ref _excludeCache);
+    }
+
+    private void RestartFlushTimer()
+    {
+        lock (_flushGate)
+        {
+            _flushTimer?.Dispose();
+            if (IsPaused)
+            {
+                _flushTimer = null;
+                return;
+            }
+
+            var ms = IsUiPaused ? PausedFlushMs : ActiveFlushMs;
+            _flushTimer = new Timer(FlushTick, null, ms, ms);
+        }
+    }
+
+    private void FlushTick(object? _)
+    {
+        if (IsPaused) return;
+        if (Interlocked.CompareExchange(ref _flushBusy, 1, 0) != 0)
+            return;
+
+        try
+        {
+            var (deletes, upserts) = _buffer.Drain();
+            if (deletes.Count == 0 && upserts.Count == 0)
+                return;
+
+            var any = false;
+
+            foreach (var path in deletes)
+            {
+                if (IsPaused) return;
+                try
+                {
+                    _db.DeleteByPath(path);
+                    _db.DeleteUnderDirectory(path);
+                    any = true;
+                    var parent = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(parent))
+                        SchedulePrune(parent);
+                }
+                catch
+                {
+                    // never crash from flush
+                }
+            }
+
+            if (upserts.Count > 0 && !IsPaused)
+            {
+                try
+                {
+                    _indexer.IndexPathsBatch(upserts);
+                    any = true;
+                }
+                catch
+                {
+                    // never crash from flush
+                }
+            }
+
+            if (any && !IsPaused)
+                FireIndexMutated();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _flushBusy, 0);
+        }
+    }
+
+    private void FireIndexMutated()
+    {
+        try { IndexMutated?.Invoke(); }
+        catch { /* never crash from mutation notify */ }
     }
 
     /// <summary>
@@ -194,7 +303,7 @@ public sealed class FileWatcherService : IDisposable
                 if (IsPaused) return;
                 _db.PruneMissing(prefix);
                 if (IsPaused) return;
-                ScheduleIndexMutated();
+                FireIndexMutated();
             }
             catch
             {

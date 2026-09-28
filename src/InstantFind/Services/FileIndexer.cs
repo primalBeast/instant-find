@@ -756,4 +756,59 @@ public sealed class FileIndexer
             // ignore inaccessible / locked
         }
     }
+
+    /// <summary>
+    /// Batch upsert for coalesced watcher flush — one UpsertBatch per flush, not per Changed.
+    /// </summary>
+    public void IndexPathsBatch(IReadOnlyList<string> paths)
+    {
+        if (paths is null || paths.Count == 0)
+            return;
+
+        try
+        {
+            var excludes = ExcludePaths.ResolveActivePrefixes(_settings);
+            var batch = new List<FileEntry>(paths.Count);
+            foreach (var path in paths)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(path))
+                        continue;
+                    if (DriveHelpers.IsRemoteRoot(path))
+                        continue;
+                    if (ExcludePaths.IsUnderAny(path, excludes))
+                        continue;
+                    if (NoisyPathHeuristics.IsNoisy(path))
+                        continue;
+
+                    if (Directory.Exists(path))
+                    {
+                        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        var name = Path.GetFileName(trimmed);
+                        if (string.IsNullOrEmpty(name)) name = path;
+                        var fe = TryCreateEntry(path, name, isDirectory: true);
+                        if (fe is not null) batch.Add(fe);
+                    }
+                    else if (File.Exists(path))
+                    {
+                        var name = Path.GetFileName(path);
+                        var fe = TryCreateEntry(path, name, isDirectory: false);
+                        if (fe is not null) batch.Add(fe);
+                    }
+                }
+                catch
+                {
+                    // ignore inaccessible / locked per path
+                }
+            }
+
+            if (batch.Count > 0)
+                _db.UpsertBatch(batch);
+        }
+        catch
+        {
+            // ignore batch failures
+        }
+    }
 }
