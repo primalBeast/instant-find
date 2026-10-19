@@ -9,7 +9,7 @@ namespace InstantFind.Services;
 /// Decides whether the indexer may enter a directory that has
 /// <see cref="FileAttributes.ReparsePoint"/>. Junctions / mount points are
 /// skipped to avoid cycles; OneDrive / Cloud Files directories are entered so
-/// placeholder names can be indexed via Enumerate + GetAttributes only
+/// placeholder names can be indexed from directory-listing metadata only
 /// (never open / hydrate / download content).
 /// </summary>
 public static class ReparseCrawlGate

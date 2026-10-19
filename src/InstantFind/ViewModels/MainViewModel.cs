@@ -1096,10 +1096,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 IsIndexing = false;
                 if (p.Error is not null)
                     StatusText = p.Error;
-                else if (p.SkippedLocked > 0)
-                    StatusText = $"Indexed {p.FilesIndexed:N0} items (skipped {p.SkippedLocked:N0} locked)";
                 else
-                    StatusText = $"Indexed {p.FilesIndexed:N0} items";
+                    StatusText = p.RebuildCompleteStatus;
 
                 // Always restart watchers — including cancel (previous index kept)
                 _watcher.ResumeAfterRebuild(DriveHelpers.FilterIndexableRoots(_settings.IndexedRoots));
