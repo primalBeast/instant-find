@@ -11,7 +11,7 @@ Public release zips are attached to [GitHub Releases](https://github.com/primalB
 | What | URL pattern |
 |------|-------------|
 | Latest release page | https://github.com/primalBeast/instant-find/releases/latest |
-| Direct zip (v1.0.29) | https://github.com/primalBeast/instant-find/releases/download/v1.0.29/InstantFind-win-x64.zip |
+| Direct zip (v1.0.30) | https://github.com/primalBeast/instant-find/releases/download/v1.0.30/InstantFind-win-x64.zip |
 
 1. Download `InstantFind-win-x64.zip`
 2. Unzip anywhere (portable)
@@ -23,7 +23,7 @@ No installer and no admin elevation required for normal use.
 
 | Allowed | Hard bans |
 |---------|-----------|
-| User-mode `Directory.EnumerateFileSystemEntries` | Kernel drivers / filter drivers |
+| User-mode directory listing (metadata only; no file open) | Kernel drivers / filter drivers |
 | SQLite FTS5 index in `%AppData%\InstantFind` | Raw NTFS MFT parsing |
 | `FileSystemWatcher` incremental updates | USN journal raw access |
 | Standard Win32 open / Explorer select | Packers, obfuscators, injectors |
@@ -51,8 +51,9 @@ Logs written **next to `InstantFind.exe`** (portable zip folder):
 
 `maxResults` defaults to **10000** (editable in `settings.json` only — no settings UI). When the cap is hit, the status bar says the limit was reached so you can refine the query.
 
-## Features (v1.0.29)
+## Features (v1.0.30)
 
+- **OneDrive Documents crawl (v1.0.30)**: Rebuild reads each folder with `System.IO.Enumeration` (`AttributesToSkip = 0`) and indexes name, attributes, size, and modified time from the listing itself. It does not call `GetAttributes` / open file contents, so Cloud Files placeholder folders are no longer dropped before they can be crawled. A bad entry is skipped and logged (`CrawlSkip` in `InstantFind-error.log`, capped) while the rest of the folder continues. Junctions and mount points are still skipped. After Rebuild, the status line appends ` · Skipped N folders` when any folder listing failed.
 - **Idle CPU: coalesced live updates (v1.0.29)**: FileSystemWatcher callbacks only enqueue path ops; a timed flush (~1.5 s while the window is active, ~6 s when minimized / in the background) de-dupes by path (case-insensitive), applies deletes before creates, and writes one `UpsertBatch` per flush instead of one DB write per event. `IndexMutated` fires once per flush. Live events under Filter → Exclude paths and noisy Temp / cache folders (`%TEMP%`, `%LOCALAPPDATA%\Temp`, `\Cache\`, `\Caches\`, `\INetCache\`, `\Code Cache\`, `\GPUCache\`, `\ShaderCache\`, Firefox `cache2`) are ignored; roots stay watched and **Rebuild Index / exclude re-crawl still index those paths**. Result refresh is deferred while minimized or not foreground, then runs once on restore. Process priority is set to **BelowNormal** (documented API; no undocumented efficiency modes, no USN/MFT).
 - **Quieter Rebuild button (v1.0.29)**: Rebuild Index is now a muted text button (no fill, faint hover); **Cancel** shows as quiet red text while indexing.
 - **Opening… spinner (v1.0.29)**: Open / Open with / Notepad++ / folder / cmd / Git Bash show a centered circular **Opening…** overlay on the results while the shell handoff runs (~600 ms after `Process.Start` returns); cleared immediately on failure. Separate from the search-bar spinner.

@@ -6,11 +6,11 @@ using InstantFind.Models;
 namespace InstantFind.Services;
 
 /// <summary>
-/// User-mode parallel indexer using Directory.EnumerateFileSystemEntries.
-/// Skips inaccessible / locked files and directories. No drivers, no MFT/USN.
-/// Directory reparse points that are junctions/mount points are skipped to avoid
-/// cycles; OneDrive / Cloud Files reparse dirs are entered (metadata only —
-/// Enumerate + GetAttributes; never open/hydrate content). Network / cloud
+/// User-mode parallel indexer. Listings use <see cref="System.IO.Enumeration.FileSystemEnumerator{TResult}"/>
+/// and take name / attributes / length / mtime from the find buffer only — never open file contents
+/// and never hydrate OneDrive placeholders. Skips inaccessible directories and keeps going after
+/// a single bad entry. Directory reparse points that are junctions/mount points are skipped to avoid
+/// cycles; OneDrive / Cloud Files reparse dirs are entered (metadata only). Network / cloud
 /// drive-letter pruning is unchanged (see DriveHelpers).
 /// Full rebuilds write to a temporary DB and atomically swap on success so
 /// cancel/crash never leaves a tiny partial live index.
@@ -20,6 +20,7 @@ public sealed class FileIndexer
     private readonly IndexDatabase _db;
     private readonly AppSettings _settings;
     private CancellationTokenSource? _cts;
+    private CrawlSkipLog _skips = new();
 
     public FileIndexer(IndexDatabase db, AppSettings settings)
     {
@@ -89,6 +90,7 @@ public sealed class FileIndexer
 
         var livePath = _db.DatabasePath;
         var rebuildPath = IndexDatabase.GetRebuildPath(livePath);
+        _skips = new CrawlSkipLog();
 
         // Fresh temp DB for this rebuild (discard any leftover)
         IndexDatabase.DiscardStaleRebuildArtifacts(livePath);
@@ -109,9 +111,8 @@ public sealed class FileIndexer
                 FilesIndexed = 0
             });
 
-            long filesIndexed = 0;
+            var totals = new IndexTotals();
             long dirsScanned = 0;
-            long skippedLocked = 0;
             var exclude = new HashSet<string>(
                 _settings.ExcludedDirectoryNames ?? new List<string>(),
                 StringComparer.OrdinalIgnoreCase);
@@ -155,11 +156,11 @@ public sealed class FileIndexer
                         {
                             Interlocked.Increment(ref dirsScanned);
                             EnumerateDirectory(dir, exclude, excludePrefixes, pending, localBatch,
-                                ref filesIndexed, ref skippedLocked, progress, ct, rebuildDb);
+                                totals, progress, ct, rebuildDb);
 
                             if (localBatch.Count >= 200)
                             {
-                                SoftUpsertBatch(rebuildDb, localBatch, ref skippedLocked, ct);
+                                SoftUpsertBatch(rebuildDb, localBatch, totals, ct, _skips);
                                 localBatch.Clear();
                             }
                         }
@@ -171,7 +172,7 @@ public sealed class FileIndexer
                         catch (Exception ex) when (IsSkippableContentException(ex))
                         {
                             // Locked / inaccessible content must not fail the whole rebuild
-                            var n = Interlocked.Increment(ref skippedLocked);
+                            var n = Interlocked.Increment(ref totals.SkippedLocked);
                             localBatch.Clear();
                             // Log first few sharing violations with path so Bradley can paste the log
                             if (n <= 25 && IndexDatabase.IsSharingViolation(ex))
@@ -196,7 +197,7 @@ public sealed class FileIndexer
 
                     if (localBatch.Count > 0 && !ct.IsCancellationRequested)
                     {
-                        try { SoftUpsertBatch(rebuildDb, localBatch, ref skippedLocked, ct); }
+                        try { SoftUpsertBatch(rebuildDb, localBatch, totals, ct, _skips); }
                         catch (OperationCanceledException) { /* discard partial batch */ }
                     }
                 }
@@ -232,15 +233,18 @@ public sealed class FileIndexer
             ct.ThrowIfCancellationRequested();
 
             // Flush complete — atomically swap rebuild → live
+            var finalCount = Interlocked.Read(ref totals.FilesIndexed);
+            var finalSkipped = Interlocked.Read(ref totals.SkippedLocked);
+            var finalFolders = _skips.Folders;
+            _skips.WriteSummary(livePath);
+
             progress?.Report(new IndexProgress
             {
                 Message = "Finalizing index…",
-                FilesIndexed = Interlocked.Read(ref filesIndexed),
-                SkippedLocked = Interlocked.Read(ref skippedLocked)
+                FilesIndexed = finalCount,
+                SkippedLocked = finalSkipped,
+                SkippedFolders = finalFolders
             });
-
-            var finalCount = Interlocked.Read(ref filesIndexed);
-            var finalSkipped = Interlocked.Read(ref skippedLocked);
             rebuildDb.Close();
             rebuildDb.Dispose();
             rebuildDb = null;
@@ -285,6 +289,7 @@ public sealed class FileIndexer
                         FilesIndexed = finalCount,
                         DirectoriesScanned = Interlocked.Read(ref dirsScanned),
                         SkippedLocked = finalSkipped,
+                        SkippedFolders = finalFolders,
                         IsComplete = true,
                         Error = "Index swap failed (database locked / in use). Previous index kept. "
                                 + $"Details in {ErrorLog.FileName} next to InstantFind.exe."
@@ -313,16 +318,19 @@ public sealed class FileIndexer
                 FilesIndexed = finalCount,
                 DirectoriesScanned = Interlocked.Read(ref dirsScanned),
                 SkippedLocked = finalSkipped,
+                SkippedFolders = finalFolders,
                 IsComplete = true
             });
         }
         catch (OperationCanceledException)
         {
+            _skips.WriteSummary(livePath);
             CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
             throw;
         }
         catch (Exception ex)
         {
+            _skips.WriteSummary(livePath);
             CleanupFailedRebuild(rebuildDb, livePath, swapSucceeded);
             ErrorLog.AppendFailure(
                 "IndexCore",
@@ -364,8 +372,9 @@ public sealed class FileIndexer
     private static void SoftUpsertBatch(
         IndexDatabase targetDb,
         List<FileEntry> batch,
-        ref long skippedLocked,
-        CancellationToken ct)
+        IndexTotals totals,
+        CancellationToken ct,
+        CrawlSkipLog skips)
     {
         if (batch.Count == 0) return;
         try
@@ -376,14 +385,15 @@ public sealed class FileIndexer
         {
             throw;
         }
-        catch (Exception ex) when (IsSkippableContentException(ex))
+        catch (Exception ex) when (IsSkippableContentException(ex) || ex is Microsoft.Data.Sqlite.SqliteException)
         {
-            // Rare: IO during batch write of content metadata path — skip entries
-            Interlocked.Add(ref skippedLocked, batch.Count);
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException)
-        {
-            // Soft-fail individual rows rather than aborting the rebuild
+            // One bad row must not drop the rest of the batch. Fatal errors (anything other than
+            // a content/SQLite failure) still propagate so a broken DB is not swapped in empty.
+            skips.Record(
+                batch[0].Path,
+                "upsert-batch",
+                ex,
+                detail: $"count={batch.Count}");
             foreach (var entry in batch)
             {
                 ct.ThrowIfCancellationRequested();
@@ -395,9 +405,10 @@ public sealed class FileIndexer
                 {
                     throw;
                 }
-                catch
+                catch (Exception rowEx) when (IsSkippableContentException(rowEx) || rowEx is Microsoft.Data.Sqlite.SqliteException)
                 {
-                    Interlocked.Increment(ref skippedLocked);
+                    Interlocked.Increment(ref totals.SkippedLocked);
+                    skips.Record(entry.Path, "upsert-row", rowEx);
                 }
             }
         }
@@ -409,8 +420,7 @@ public sealed class FileIndexer
         IReadOnlyList<string> excludePrefixes,
         ConcurrentQueue<string> pending,
         List<FileEntry> localBatch,
-        ref long filesIndexed,
-        ref long skippedLocked,
+        IndexTotals totals,
         IProgress<IndexProgress>? progress,
         CancellationToken ct,
         IndexDatabase targetDb)
@@ -418,145 +428,63 @@ public sealed class FileIndexer
         if (ExcludePaths.IsUnderAny(dir, excludePrefixes))
             return;
 
-        IEnumerable<string> entries;
+        CrawlListingEnumerator enumerator;
         try
         {
-            entries = Directory.EnumerateFileSystemEntries(dir);
+            enumerator = new CrawlListingEnumerator(dir, _skips);
         }
-        catch (UnauthorizedAccessException) { Interlocked.Increment(ref skippedLocked); return; }
-        catch (DirectoryNotFoundException) { return; }
-        catch (IOException) { Interlocked.Increment(ref skippedLocked); return; }
-        catch (SecurityException) { Interlocked.Increment(ref skippedLocked); return; }
-
-        IEnumerator<string>? enumerator = null;
-        try
+        catch (OperationCanceledException)
         {
-            enumerator = entries.GetEnumerator();
+            throw;
         }
-        catch (Exception ex) when (IsSkippableContentException(ex))
+        catch (Exception ex)
         {
-            Interlocked.Increment(ref skippedLocked);
+            Interlocked.Increment(ref totals.SkippedLocked);
+            _skips.Record(dir, "directory-open", ex, folder: true);
             return;
         }
 
         using (enumerator)
         {
-            while (true)
-            {
-                if (ct.IsCancellationRequested) return;
-
-                bool moved;
-                try
+            CrawlListing.Consume(
+                enumerator,
+                dir,
+                _settings.IncludeDirectories,
+                exclude,
+                excludePrefixes,
+                pending,
+                localBatch,
+                _skips,
+                ref totals.SkippedLocked,
+                ct,
+                onIndexed: () => Report(totals, dir, progress),
+                flush: () =>
                 {
-                    moved = enumerator.MoveNext();
-                }
-                catch (Exception ex) when (IsSkippableContentException(ex))
-                {
-                    // Mid-enumeration sharing violation — skip rest of this directory
-                    Interlocked.Increment(ref skippedLocked);
-                    return;
-                }
-
-                if (!moved) break;
-
-                string entryPath;
-                try { entryPath = enumerator.Current; }
-                catch (Exception ex) when (IsSkippableContentException(ex))
-                {
-                    Interlocked.Increment(ref skippedLocked);
-                    continue;
-                }
-
-                string name;
-                try { name = Path.GetFileName(entryPath); }
-                catch
-                {
-                    Interlocked.Increment(ref skippedLocked);
-                    continue;
-                }
-
-                bool isDir;
-                try
-                {
-                    var attrs = File.GetAttributes(entryPath);
-                    // Skip junction/mount-point cycles; enter OneDrive / Cloud Files (metadata only)
-                    if ((attrs & FileAttributes.ReparsePoint) != 0
-                        && (attrs & FileAttributes.Directory) != 0
-                        && !ReparseCrawlGate.ShouldEnterDirectoryReparsePoint(entryPath, attrs))
-                        continue;
-                    isDir = (attrs & FileAttributes.Directory) != 0;
-                }
-                catch (Exception ex) when (IsSkippableContentException(ex))
-                {
-                    Interlocked.Increment(ref skippedLocked);
-                    continue;
-                }
-                catch
-                {
-                    Interlocked.Increment(ref skippedLocked);
-                    continue;
-                }
-
-                if (isDir)
-                {
-                    if (exclude.Contains(name))
-                        continue;
-                    if (ExcludePaths.IsUnderAny(entryPath, excludePrefixes))
-                        continue;
-
-                    pending.Enqueue(entryPath);
-
-                    if (_settings.IncludeDirectories)
-                    {
-                        var fe = TryCreateEntry(entryPath, name, isDirectory: true);
-                        if (fe is not null)
-                        {
-                            localBatch.Add(fe);
-                            Report(ref filesIndexed, dir, progress, ref skippedLocked);
-                        }
-                        else
-                        {
-                            Interlocked.Increment(ref skippedLocked);
-                        }
-                    }
-                }
-                else
-                {
-                    var fe = TryCreateEntry(entryPath, name, isDirectory: false);
-                    if (fe is not null)
-                    {
-                        localBatch.Add(fe);
-                        Report(ref filesIndexed, dir, progress, ref skippedLocked);
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref skippedLocked);
-                    }
-                }
-
-                // Flush mid-directory if batch is large so cancel isn't blocked long
-                if (localBatch.Count >= 200)
-                {
-                    SoftUpsertBatch(targetDb, localBatch, ref skippedLocked, ct);
+                    SoftUpsertBatch(targetDb, localBatch, totals, ct, _skips);
                     localBatch.Clear();
-                }
-            }
+                });
         }
     }
 
-    private static void Report(ref long filesIndexed, string dir, IProgress<IndexProgress>? progress, ref long skippedLocked)
+    private static void Report(IndexTotals totals, string dir, IProgress<IndexProgress>? progress)
     {
-        var count = Interlocked.Increment(ref filesIndexed);
+        var count = Interlocked.Increment(ref totals.FilesIndexed);
         if (count == 1 || count % 500 == 0)
         {
             progress?.Report(new IndexProgress
             {
                 CurrentPath = dir,
                 FilesIndexed = count,
-                SkippedLocked = Interlocked.Read(ref skippedLocked),
+                SkippedLocked = Interlocked.Read(ref totals.SkippedLocked),
                 IsComplete = false
             });
         }
+    }
+
+    private sealed class IndexTotals
+    {
+        public long FilesIndexed;
+        public long SkippedLocked;
     }
 
     public static FileEntry? TryCreateEntry(string fullPath, string name, bool isDirectory)
@@ -630,6 +558,7 @@ public sealed class FileIndexer
         _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         var ct = _cts.Token;
         IsRunning = true;
+        _skips = new CrawlSkipLog();
 
         try
         {
@@ -648,8 +577,7 @@ public sealed class FileIndexer
             var pending = new ConcurrentQueue<string>();
             pending.Enqueue(prefix.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             var localBatch = new List<FileEntry>(256);
-            long filesIndexed = 0;
-            long skippedLocked = 0;
+            var totals = new IndexTotals();
             long lastUiTick = 0;
             const long uiMinIntervalMs = 200;
 
@@ -663,7 +591,7 @@ public sealed class FileIndexer
                 progress.Report(new IndexProgress
                 {
                     FilesIndexed = count,
-                    SkippedLocked = Interlocked.Read(ref skippedLocked),
+                    SkippedLocked = Interlocked.Read(ref totals.SkippedLocked),
                     IsComplete = false,
                     Message = $"{count:N0} items indexed - Indexing…"
                 });
@@ -685,33 +613,35 @@ public sealed class FileIndexer
                     excludePrefixes,
                     pending,
                     localBatch,
-                    ref filesIndexed,
-                    ref skippedLocked,
+                    totals,
                     uiProgress,
                     ct,
                     _db);
 
                 if (localBatch.Count >= 200)
                 {
-                    SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+                    SoftUpsertBatch(_db, localBatch, totals, ct, _skips);
                     localBatch.Clear();
                 }
             }
 
             if (localBatch.Count > 0)
-                SoftUpsertBatch(_db, localBatch, ref skippedLocked, ct);
+                SoftUpsertBatch(_db, localBatch, totals, ct, _skips);
 
-            var finalCount = Interlocked.Read(ref filesIndexed);
+            var finalCount = Interlocked.Read(ref totals.FilesIndexed);
+            _skips.WriteSummary(prefix);
             // Final tick so UI sees last count; VM clears "Indexing…" after IsIndexing=false
             progress?.Report(new IndexProgress
             {
                 FilesIndexed = finalCount,
-                SkippedLocked = Interlocked.Read(ref skippedLocked),
+                SkippedLocked = Interlocked.Read(ref totals.SkippedLocked),
+                SkippedFolders = _skips.Folders,
                 IsComplete = true
             });
         }
         catch (OperationCanceledException)
         {
+            _skips.WriteSummary(prefix);
             progress?.Report(new IndexProgress
             {
                 IsComplete = true,
@@ -720,6 +650,7 @@ public sealed class FileIndexer
         }
         finally
         {
+            try { _skips.WriteSummary(prefix); } catch { /* logging must not mask the crawl result */ }
             IsRunning = false;
         }
     }
